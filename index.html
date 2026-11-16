@@ -137,17 +137,17 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 <input type="file" id="cam" accept="image/*" hidden>
 <script>
 'use strict';
-var VERSION = '2.2';
+var VERSION = '2.3';
 
 /* ---------- хранилище в браузере ---------- */
 var LS = {
   get: function (k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-function emptyState() { return { settings: {}, products: [], food: [], habits: [], checks: [], weights: [], levels: [], tasks: [], tracks: [], workouts: [], exercises: [] }; }
+function emptyState() { return { settings: {}, products: [], food: [], habits: [], checks: [], weights: [], levels: [], tasks: [], tracks: [], workouts: [], exercises: [], steps: [] }; }
 var conf = LS.get('tr_conf', { url: '', key: '' });
 var S = LS.get('tr_cache', null) || emptyState();
-['tasks', 'tracks', 'workouts', 'exercises'].forEach(function (k) { if (!S[k]) S[k] = []; });
+['tasks', 'tracks', 'workouts', 'exercises', 'steps'].forEach(function (k) { if (!S[k]) S[k] = []; });
 var SRV = LS.get('tr_srv', '');
 var Q = LS.get('tr_queue', []);
 var UI = { tab: LS.get('tr_tab', 'home'), foodDate: null, habitBack: 0, fitRange: 30, more: LS.get('tr_more', 'music'), fitTab: LS.get('tr_fit', 'wk'), wkDate: null, showDone: false, sheet: null };
@@ -233,7 +233,8 @@ function target() { return num(st('kcal', 1800)) || 1800; }
 function corridor() { return num(st('corridor', 100)) || 100; }
 
 function buildIdx() {
-  IX = { chk: {}, food: {}, w: {}, wk: {} };
+  IX = { chk: {}, food: {}, w: {}, wk: {}, st: {} };
+  S.steps.forEach(function (x) { if (isDate(x.date) && num(x.steps) > 0) IX.st[x.date] = num(x.steps); });
   S.checks.forEach(function (c) { IX.chk[c.date + '|' + c.habit] = num(c.value); });
   S.food.forEach(function (f) { if (!isDate(f.date)) return; (IX.food[f.date] = IX.food[f.date] || []).push(f); });
   S.weights.forEach(function (w) { if (isDate(w.date) && num(w.weight) > 0) IX.w[w.date] = w; });
@@ -257,6 +258,7 @@ function hAuto(h, d) {
   if (h.type === 'weight') return !!IX.w[d];
   if (h.type === 'food') return (IX.food[d] || []).length >= hGoal(h);
   if (isGym(h)) return !!IX.wk[d];
+  if (isSteps(h)) return (IX.st[d] || 0) >= stepsGoal();
   return false;
 }
 function hDone(h, d) { if (h.type === 'count') return hv(h, d) >= hGoal(h); return hAuto(h, d) || hv(h, d) > 0; }
@@ -328,6 +330,8 @@ function setsParse(s) {
 function setsStr(a) { return a.map(function (x) { return x.w + '×' + x.r; }).join(', '); }
 function setsShow(a) { return a.map(function (x) { return x.w > 0 ? fmt(x.w, 1) + '×' + x.r : x.r + ' повт.'; }).join(' · '); }
 function isGym(h) { return h.type === 'gym' || String(h.id) === 'h_gym'; }
+function isSteps(h) { return h.type === 'steps' || String(h.id) === 'h_steps'; }
+function stepsGoal() { return num(st('stepsGoal', 8000)) || 8000; }
 function wkRows() {
   return S.workouts.filter(function (w) { return has(w.id) && isDate(w.date) && has(w.exercise) && setsParse(w.sets).length; })
     .sort(function (a, b) { return cmp(a.date, b.date) || cmp(a.added, b.added); });
@@ -487,7 +491,7 @@ function fromServer(j) {
   return {
     settings: j.settings || {}, products: j.products || [], food: (j.food || []).map(function (f) { f.id = String(f.id); return f; }),
     habits: (j.habits || []).map(function (h) { h.id = String(h.id); return h; }), checks: j.checks || [], weights: j.weights || [], levels: j.levels || [],
-    tasks: (j.tasks || []).map(sid), tracks: (j.tracks || []).map(sid), workouts: (j.workouts || []).map(sid), exercises: j.exercises || []
+    tasks: (j.tasks || []).map(sid), tracks: (j.tracks || []).map(sid), workouts: (j.workouts || []).map(sid), exercises: j.exercises || [], steps: j.steps || []
   };
 }
 function sync() {
@@ -770,6 +774,7 @@ function habitRow(x, D, off) {
   if (x.type === 'weight') subt = IX.w[D] ? fmt(num(IX.w[D].weight), 1) + ' кг' : 'нажми, чтобы записать вес';
   else if (x.type === 'food') { var fn = (IX.food[D] || []).length; subt = (fn >= g ? 'записей: ' + fn : fn + ' из ' + g + ' записей') + ' · само'; }
   else if (isGym(x) && IX.wk[D]) subt = 'тренировка записана · само';
+  else if (isSteps(x) && IX.st[D]) subt = fmt(IX.st[D]) + ' из ' + fmt(stepsGoal()) + ' шагов · из «Здоровья»';
   else if (x.type === 'count') subt = v + ' из ' + g + ' ' + esc(x.unit || '');
   else subt = sk ? 'серия ' + sk + ' ' + plural(sk, 'день', 'дня', 'дней') : 'серия 0';
   subt += ' · +' + fmt(num(x.xp)) + ' XP';
@@ -1045,7 +1050,7 @@ function renderSheet() {
       '<div class="f2">' + fld('Имя', 'name', d.name, 'autocomplete="off"') + fld('Рост, см', 'height', d.height, DEC) + fld('Возраст', 'age', d.age, 'inputmode="numeric"') +
       '<div class="field"><label>Пол</label><div class="seg" style="height:50px"><button data-a="sSex" data-v="м" class="' + (d.sex !== 'ж' ? 'on' : '') + '">М</button><button data-a="sSex" data-v="ж" class="' + (d.sex === 'ж' ? 'on' : '') + '">Ж</button></div></div></div>' +
       '<div class="field"><label>Движение</label><div class="seg">' + [[1.2, 'Мало'], [1.375, '1–3 трен.'], [1.55, '3–5 трен.']].map(function (a) { return '<button data-a="sAct" data-v="' + a[0] + '" class="' + (num(d.activity) === a[0] ? 'on' : '') + '">' + a[1] + '</button>'; }).join('') + '</div></div>' +
-      '<div class="f2">' + fld('Стартовый вес', 'startWeight', d.startWeight, DEC) + fld('Цель, кг', 'goalWeight', d.goalWeight, DEC) + '</div>' +
+      '<div class="f2">' + fld('Стартовый вес', 'startWeight', d.startWeight, DEC) + fld('Цель, кг', 'goalWeight', d.goalWeight, DEC) + fld('Шагов в день', 'stepsGoal', d.stepsGoal, 'inputmode="numeric"') + '</div>' +
       '<span class="lbl">Питание</span>' +
       '<div class="f2">' + fld('Норма, ккал', 'kcal', d.kcal, 'inputmode="numeric"') + fld('Коридор, ± ккал', 'corridor', d.corridor, 'inputmode="numeric"') +
       fld('Белки, г', 'protein', d.protein, 'inputmode="numeric"') + fld('Жиры, г', 'fat', d.fat, 'inputmode="numeric"') + fld('Углеводы, г', 'carbs', d.carbs, 'inputmode="numeric"') + '</div>' +
@@ -1218,6 +1223,7 @@ var A = {
   settings: function () {
     var d = {};
     ['name', 'height', 'age', 'sex', 'activity', 'startWeight', 'goalWeight', 'kcal', 'corridor', 'protein', 'fat', 'carbs'].forEach(function (k) { d[k] = st(k, ''); });
+    d.stepsGoal = st('stepsGoal', 8000);
     d.url = conf.url; d.key = conf.key;
     openSheet('settings', d);
   },
@@ -1510,7 +1516,7 @@ var A = {
   saveSet: function () {
     var d = UI.sheet.data, item = {};
     ['name', 'sex'].forEach(function (k) { item[k] = String(d[k] || '').trim(); });
-    ['height', 'age', 'activity', 'startWeight', 'goalWeight', 'kcal', 'corridor', 'protein', 'fat', 'carbs'].forEach(function (k) { if (has(d[k])) item[k] = num(d[k]); });
+    ['height', 'age', 'activity', 'startWeight', 'goalWeight', 'kcal', 'corridor', 'protein', 'fat', 'carbs', 'stepsGoal'].forEach(function (k) { if (has(d[k])) item[k] = num(d[k]); });
     closeSheet(); act(function () { push({ op: 'settings.save', item: item }); });
   },
   saveConn: function () {
