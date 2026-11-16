@@ -111,6 +111,19 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 .soon{border:1px dashed rgba(255,255,255,.18);background:transparent}
 .err{background:#2A0E15;border:1px solid rgba(255,77,109,.4);color:#FFB3C1;border-radius:16px;padding:12px 14px;font-size:13px}
 .sync{display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;color:var(--mut);background:none;border:none;padding:8px;width:100%}
+.dots{display:grid;grid-template-columns:repeat(7,7px);gap:6px}
+.dots i{width:7px;height:7px;border-radius:50%;background:#2E2E33;display:block}
+.dots i.on{background:#fff;box-shadow:0 0 8px 2px rgba(255,255,255,.65)}
+.dots i.fu{background:#19191B}
+.dots i.td{outline:1.5px solid #A1A1AA;outline-offset:2px}
+.tk{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:10px 14px 10px 10px;display:flex;align-items:center;gap:10px}
+.tck{width:44px;height:44px;border-radius:14px;border:2px solid #52525B;background:transparent;display:flex;align-items:center;justify-content:center;padding:0;flex-shrink:0}
+.tck.on{border:none;background:var(--orange);color:#000}
+.cl{display:flex;align-items:center;gap:12px;min-height:44px;background:none;border:none;text-align:left;padding:0;width:100%;font-size:15px}
+.cl .bx{width:22px;height:22px;border-radius:7px;border:2px solid #52525B;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.cl.on .bx{border:none;background:var(--violet);color:#000}
+.cl.on .t{color:var(--mut);text-decoration:line-through}
+.setr{display:grid;grid-template-columns:28px minmax(0,1fr) minmax(0,1fr) 40px;gap:8px;align-items:center}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes pop{from{transform:scale(.8);opacity:0}to{transform:scale(1);opacity:1}}
@@ -123,18 +136,20 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 'use strict';
-var VERSION = '1.0';
+var VERSION = '2.0';
 
 /* ---------- хранилище в браузере ---------- */
 var LS = {
   get: function (k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-function emptyState() { return { settings: {}, products: [], food: [], habits: [], checks: [], weights: [], levels: [] }; }
+function emptyState() { return { settings: {}, products: [], food: [], habits: [], checks: [], weights: [], levels: [], tasks: [], tracks: [], workouts: [], exercises: [] }; }
 var conf = LS.get('tr_conf', { url: '', key: '' });
 var S = LS.get('tr_cache', null) || emptyState();
+['tasks', 'tracks', 'workouts', 'exercises'].forEach(function (k) { if (!S[k]) S[k] = []; });
+var SRV = LS.get('tr_srv', '');
 var Q = LS.get('tr_queue', []);
-var UI = { tab: LS.get('tr_tab', 'home'), foodDate: null, habitBack: 0, fitRange: 30, more: 'music', sheet: null };
+var UI = { tab: LS.get('tr_tab', 'home'), foodDate: null, habitBack: 0, fitRange: 30, more: LS.get('tr_more', 'music'), fitTab: LS.get('tr_fit', 'wk'), wkDate: null, showDone: false, sheet: null };
 var SYNC = { busy: false, again: false, last: LS.get('tr_last', 0), err: '', timer: null };
 var IX = null;
 
@@ -216,10 +231,11 @@ function target() { return num(st('kcal', 1800)) || 1800; }
 function corridor() { return num(st('corridor', 100)) || 100; }
 
 function buildIdx() {
-  IX = { chk: {}, food: {}, w: {} };
+  IX = { chk: {}, food: {}, w: {}, wk: {} };
   S.checks.forEach(function (c) { IX.chk[c.date + '|' + c.habit] = num(c.value); });
   S.food.forEach(function (f) { if (!isDate(f.date)) return; (IX.food[f.date] = IX.food[f.date] || []).push(f); });
   S.weights.forEach(function (w) { if (isDate(w.date) && num(w.weight) > 0) IX.w[w.date] = w; });
+  wkRows().forEach(function (w) { (IX.wk[w.date] = IX.wk[w.date] || []).push(w); });
 }
 function habits() {
   return S.habits.filter(function (h) { return has(h.id) && lc(h.active) !== 'нет'; })
@@ -238,6 +254,7 @@ function hGoal(h) { return h.type === 'count' ? Math.max(1, num(h.goal) || 1) : 
 function hAuto(h, d) {
   if (h.type === 'weight') return !!IX.w[d];
   if (h.type === 'food') return (IX.food[d] || []).length >= hGoal(h);
+  if (isGym(h)) return !!IX.wk[d];
   return false;
 }
 function hDone(h, d) { if (h.type === 'count') return hv(h, d) >= hGoal(h); return hAuto(h, d) || hv(h, d) > 0; }
@@ -259,6 +276,83 @@ function firstDate() {
   var t = today();
   return c[0] && c[0] < t ? c[0] : t;
 }
+
+/* ---------- задачи, музыка, тренировки: общее ---------- */
+var STAGES = ['Идея', 'Демо', 'Запись', 'Сведение', 'Мастеринг', 'Релиз'];
+var SSHORT = ['Идея', 'Демо', 'Запись', 'Свед.', 'Мастер', 'Релиз'];
+var PXP = { P1: 25, P2: 15, P3: 10 };
+var MCAP = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+function srvOld() { return has(SRV) && num(SRV) < 2; }
+function oldCard() {
+  return '<div class="card soon" style="display:flex;flex-direction:column;gap:8px"><b style="font-size:15px">Нужно обновить сервер</b>' +
+    '<span class="sub" style="font-size:13px;line-height:1.5">В Apps Script замени Код.gs на новый, запусти setup и разверни новую версию. До этого записи в этом разделе не сохранятся.</span></div>';
+}
+function byId(list, id) { for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i]; return null; }
+function cmp(a, b) { a = String(a == null ? '' : a); b = String(b == null ? '' : b); return a < b ? -1 : (a > b ? 1 : 0); }
+
+function stIdx(t) { var i = STAGES.indexOf(String(t.stage || '').trim()); return i < 0 ? 0 : i; }
+function clParse(s) {
+  return String(s || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean).map(function (l) {
+    return { d: l.charAt(0) === '☑', t: l.replace(/^[☑☐]\s*/, '') };
+  });
+}
+function clStr(a) { return a.map(function (i) { return (i.d ? '☑ ' : '☐ ') + i.t; }).join('\n'); }
+function trackXp(t) { var i = stIdx(t); return i * 40 + (i === 5 ? 100 : 0) + clParse(t.checklist).filter(function (x) { return x.d; }).length * 5; }
+function tracksAll() { return S.tracks.filter(function (t) { return has(t.id) && has(t.name); }); }
+
+function tasksAll() { return S.tasks.filter(function (t) { return has(t.id) && has(t.title); }); }
+function taskDone(t) { return lc(t.status) === 'готово'; }
+function taskXp(t) {
+  if (!taskDone(t)) return 0;
+  var b = PXP[t.prio] || 15;
+  if (isDate(t.due) && isDate(t.doneAt) && t.doneAt <= t.due) b = Math.round(b * 1.5);
+  return b;
+}
+function taskPot(t) { var b = PXP[t.prio] || 15; return isDate(t.due) && t.due >= today() ? Math.round(b * 1.5) : b; }
+function dueLbl(d) {
+  var T = today();
+  if (d === T) return 'сегодня';
+  if (d === addD(T, 1)) return 'завтра';
+  if (d === addD(T, -1)) return 'вчера';
+  return WDL[wd(d)] + ', ' + dShort(d);
+}
+
+function setsParse(s) {
+  return String(s || '').split(/[,;]\s*/).map(function (x) {
+    var m = x.trim().match(/^([\d.]+)\s*[x×х*]\s*(\d+)$/i);
+    return m ? { w: parseFloat(m[1]) || 0, r: parseInt(m[2], 10) || 0 } : null;
+  }).filter(function (x) { return x && x.r > 0; });
+}
+function setsStr(a) { return a.map(function (x) { return x.w + '×' + x.r; }).join(', '); }
+function setsShow(a) { return a.map(function (x) { return x.w > 0 ? fmt(x.w, 1) + '×' + x.r : x.r + ' повт.'; }).join(' · '); }
+function isGym(h) { return h.type === 'gym' || String(h.id) === 'h_gym'; }
+function wkRows() {
+  return S.workouts.filter(function (w) { return has(w.id) && isDate(w.date) && has(w.exercise) && setsParse(w.sets).length; })
+    .sort(function (a, b) { return cmp(a.date, b.date) || cmp(a.added, b.added); });
+}
+function wkStats() {
+  var best = {}, prs = 0, days = {};
+  wkRows().forEach(function (w) {
+    var k = lc(w.exercise), ss = setsParse(w.sets);
+    days[w.date] = (days[w.date] || 0) + 1;
+    var mw = Math.max.apply(null, ss.map(function (s) { return s.w; }));
+    var reps = Math.max.apply(null, ss.filter(function (s) { return mw > 0 ? s.w === mw : true; }).map(function (s) { return s.r; }));
+    var score = mw > 0 ? 1e6 + mw : reps;
+    var b = best[k];
+    if (!b) best[k] = { name: w.exercise, score: score, w: mw, r: reps, date: w.date, n: 1 };
+    else {
+      b.n++;
+      if (score > b.score) { prs++; b.score = score; b.w = mw; b.r = reps; b.date = w.date; }
+      else if (score === b.score && mw > 0 && reps > b.r) b.r = reps;
+    }
+  });
+  return { days: days, nDays: Object.keys(days).length, prs: prs, best: best };
+}
+function lastOf(name, exceptId) {
+  var rows = wkRows().filter(function (w) { return lc(w.exercise) === lc(name) && String(w.id) !== String(exceptId || ''); });
+  return rows.length ? rows[rows.length - 1] : null;
+}
+function bestShow(b) { return b.w > 0 ? fmt(b.w, 1) + ' кг × ' + b.r : b.r + ' повт.'; }
 
 /* ---------- очки, уровни, значки ---------- */
 function calc() {
@@ -290,6 +384,13 @@ function calc() {
   r.lost = sw && minW ? Math.max(0, sw - minW) : 0;
   var kg = Math.floor(r.lost + 1e-9);
   r.kgXp = kg * 30; r.xp += r.kgXp; r.stats['сила'] += r.kgXp;
+  var wk = wkStats(); r.wk = wk; r.wkXp = wk.nDays * 20 + wk.prs * 10; r.xp += r.wkXp; r.stats['сила'] += r.wkXp;
+  r.taskXp = 0; r.tasksDone = 0; r.todayExtra = wk.days[T] ? 20 : 0;
+  tasksAll().forEach(function (t) { var x = taskXp(t); if (taskDone(t)) r.tasksDone++; r.taskXp += x; if (t.doneAt === T) r.todayExtra += x; });
+  r.xp += r.taskXp; r.stats['продуктивность'] += r.taskXp;
+  r.trackXp = 0; r.released = 0;
+  tracksAll().forEach(function (t) { r.trackXp += trackXp(t); if (stIdx(t) === 5) r.released++; });
+  r.xp += r.trackXp; r.stats['творчество'] += r.trackXp;
   function closed(x) { return x && x.s > 0 && x.d / x.s >= 0.8; }
   var run = 0, best = 0;
   for (d = first; d <= T; d = addD(d, 1)) {
@@ -316,7 +417,13 @@ function badgeList(r) {
     { id: 'k3', t: 'Минус 3 кг', d: 'от старта', ok: r.lost >= 3, c: '#F4F4F5' },
     { id: 'k5', t: 'Минус 5 кг', d: 'от старта', ok: r.lost >= 5, c: '#F4F4F5' },
     { id: 'k10', t: 'Минус 10 кг', d: 'первая цель', ok: r.lost >= 10, c: '#FFC53D' },
-    { id: 'h100', t: 'Сотня', d: '100 отметок', ok: r.checks >= 100, c: '#A78BFA' }
+    { id: 'h100', t: 'Сотня', d: '100 отметок привычек', ok: r.checks >= 100, c: '#FF4D6D' },
+    { id: 'w1', t: 'Первая тренировка', d: 'запись в журнале', ok: r.wk.nDays >= 1, c: '#F4F4F5' },
+    { id: 'w10', t: '10 тренировок', d: 'в журнале', ok: r.wk.nDays >= 10, c: '#F4F4F5' },
+    { id: 'pr1', t: 'Рекорд', d: 'побил свой вес', ok: r.wk.prs >= 1, c: '#FFC53D' },
+    { id: 't10', t: 'Десятка', d: '10 задач сдано', ok: r.tasksDone >= 10, c: '#FB923C' },
+    { id: 't50', t: 'Полтинник', d: '50 задач сдано', ok: r.tasksDone >= 50, c: '#FB923C' },
+    { id: 'rel1', t: 'Первый релиз', d: 'трек вышел', ok: r.released >= 1, c: '#A78BFA' }
   ];
 }
 
@@ -350,6 +457,13 @@ function applyOp(s, op) {
     case 'weight.save': upsertBy(s.weights, it, function (x) { return String(x.date); }); break;
     case 'weight.delete': s.weights = s.weights.filter(function (x) { return String(x.date) !== String(op.date); }); break;
     case 'settings.save': s.settings = Object.assign({}, s.settings, it); break;
+    case 'task.save': upsertBy(s.tasks, it, function (x) { return String(x.id); }); break;
+    case 'task.delete': s.tasks = s.tasks.filter(function (x) { return String(x.id) !== String(op.id); }); break;
+    case 'track.save': upsertBy(s.tracks, it, function (x) { return String(x.id); }); break;
+    case 'track.delete': s.tracks = s.tracks.filter(function (x) { return String(x.id) !== String(op.id); }); break;
+    case 'wk.save': upsertBy(s.workouts, it, function (x) { return String(x.id); }); break;
+    case 'wk.delete': s.workouts = s.workouts.filter(function (x) { return String(x.id) !== String(op.id); }); break;
+    case 'exercise.save': upsertBy(s.exercises, it, function (x) { return lc(x.name); }); break;
   }
 }
 function push(op) { applyOp(S, op); Q.push(op); saveLocal(); scheduleSync(700); }
@@ -366,10 +480,12 @@ function api(payload) {
     })
     .finally(function () { clearTimeout(tm); });
 }
+function sid(x) { x.id = String(x.id); return x; }
 function fromServer(j) {
   return {
     settings: j.settings || {}, products: j.products || [], food: (j.food || []).map(function (f) { f.id = String(f.id); return f; }),
-    habits: (j.habits || []).map(function (h) { h.id = String(h.id); return h; }), checks: j.checks || [], weights: j.weights || [], levels: j.levels || []
+    habits: (j.habits || []).map(function (h) { h.id = String(h.id); return h; }), checks: j.checks || [], weights: j.weights || [], levels: j.levels || [],
+    tasks: (j.tasks || []).map(sid), tracks: (j.tracks || []).map(sid), workouts: (j.workouts || []).map(sid), exercises: j.exercises || []
   };
 }
 function sync() {
@@ -381,6 +497,7 @@ function sync() {
   return api({ action: 'batch', ops: ops, reload: true }).then(function (j) {
     Q = Q.slice(ops.length);
     S = fromServer(j);
+    SRV = String(j.version || '1.0'); LS.set('tr_srv', SRV);
     Q.forEach(function (op) { applyOp(S, op); });
     saveLocal();
     SYNC.last = Date.now(); LS.set('tr_last', SYNC.last); SYNC.err = '';
@@ -454,7 +571,7 @@ function render() {
   app.innerHTML = h + '<div id="syncbox">' + syncLine() + '</div>' + vNav();
 }
 function vNav() {
-  var tabs = [['home', 'grid', 'Главная', '#FFFFFF'], ['food', 'food', 'Рацион', '#34D399'], ['habits', 'habits', 'Привычки', '#FF4D6D'], ['fit', 'gym', 'Фитнес', '#FFFFFF'], ['more', 'music', 'Музыка и задачи', '#A78BFA']];
+  var tabs = [['home', 'grid', 'Главная', '#FFFFFF'], ['food', 'food', 'Рацион', '#34D399'], ['habits', 'habits', 'Привычки', '#FF4D6D'], ['fit', 'gym', 'Фитнес', '#FFFFFF'], ['more', UI.more === 'tasks' ? 'task' : 'music', 'Музыка и задачи', UI.more === 'tasks' ? '#FB923C' : '#A78BFA']];
   return '<nav class="nav" aria-label="Разделы">' + tabs.map(function (t) {
     var on = UI.tab === t[0];
     return '<button data-a="tab" data-v="' + t[0] + '" aria-label="' + t[2] + '"' + (on ? ' aria-current="page" style="background:' + t[3] + ';color:#000"' : '') + '>' + ic(t[1], 24) + '</button>';
@@ -480,6 +597,8 @@ function vHome(r) {
   var sw = num(st('startWeight', 0)), gw = num(st('goalWeight', 0)), cw = lw ? num(lw.weight) : sw;
   var prog = sw > gw && gw > 0 ? clamp((sw - cw) / (sw - gw), 0, 1) : 0;
   var name = st('name', '');
+  var openT = tasksAll().filter(function (t) { return !taskDone(t); }), dueT = openT.filter(function (t) { return isDate(t.due) && t.due <= T; }).length;
+  var workTr = tracksAll().filter(function (t) { return stIdx(t) < 5; }).sort(function (a, b) { return cmp(b.updated, a.updated); });
   var h = '<div class="hdr"><div style="display:flex;flex-direction:column;gap:6px;min-width:0"><span class="sub">' + WDF[wd(T)] + ', ' + dLong(T) + '</span>' +
     '<h1 class="h1">' + (name ? 'Привет, ' + esc(name) : 'Привет') + '</h1></div>' +
     '<button class="rbtn" data-a="settings" aria-label="Настройки">' + ic('gear', 22) + '</button></div>';
@@ -487,7 +606,7 @@ function vHome(r) {
   h += '<button class="card" data-a="level" style="display:flex;flex-direction:column;gap:18px;text-align:left;width:100%">' +
     '<div style="display:flex;align-items:center;gap:16px;width:100%"><div class="ring" style="width:84px;height:84px">' + ring(84, 8, L.frac, '#FFC53D') +
     '<div class="disp" style="font-size:28px;font-weight:700;color:var(--gold)">' + L.n + '</div></div>' +
-    '<div style="display:flex;flex-direction:column;gap:6px;min-width:0"><span class="sub" style="font-size:13px">Уровень ' + L.n + (r.today.xp ? ' · сегодня +' + r.today.xp + ' XP' : '') + '</span>' +
+    '<div style="display:flex;flex-direction:column;gap:6px;min-width:0"><span class="sub" style="font-size:13px">Уровень ' + L.n + (r.today.xp + r.todayExtra ? ' · сегодня +' + (r.today.xp + r.todayExtra) + ' XP' : '') + '</span>' +
     '<span class="disp" style="font-size:20px;font-weight:600">' + esc(lname(L.n)) + '</span>' +
     '<span class="sub" style="font-size:13px"><b style="color:var(--gold)">' + fmt(r.xp) + '</b> / ' + fmt(L.hi) + ' XP · ещё ' + fmt(L.left) + '</span></div></div>' +
     '<div style="display:flex;flex-direction:column;gap:11px;width:100%"><span class="lbl">Характеристики</span>' +
@@ -501,12 +620,14 @@ function vHome(r) {
     '<button class="tile" data-a="tab" data-v="food"><span class="sub">Калории</span><div><div class="big">' + fmt(tot.kcal) + '</div><div class="sub" style="font-size:13px;margin-top:2px">из ' + fmt(tg) + ' ккал</div></div>' +
     '<div style="display:flex;flex-direction:column;gap:6px">' + bar(tot.kcal / tg, tot.kcal > tg + corridor() ? 'var(--amber)' : 'var(--green)') +
     '<span style="font-size:12px;color:' + (left >= -corridor() ? 'var(--green)' : 'var(--amber)') + '">' + (left >= 0 ? 'осталось ' + fmt(left) : 'больше на ' + fmt(-left)) + '</span></div></button>' +
-    '<button class="tile" data-a="tab" data-v="fit"><span class="sub">Вес</span><div style="display:flex;align-items:baseline;gap:4px"><span class="big">' + (lw ? fmt(num(lw.weight), 1) : '—') + '</span><span class="sub">кг</span></div>' +
+    '<button class="tile" data-a="tab" data-v="fit" data-fit="body"><span class="sub">Вес</span><div style="display:flex;align-items:baseline;gap:4px"><span class="big">' + (lw ? fmt(num(lw.weight), 1) : '—') + '</span><span class="sub">кг</span></div>' +
     '<div style="display:flex;flex-direction:column;gap:4px">' + weightDelta(lw, pw) + '<span style="font-size:12px" class="mut">' + (lw ? (lw.date === T ? 'сегодня' : dShort(lw.date)) : 'нет замеров') + '</span></div></button>' +
     '<button class="tile" data-a="tab" data-v="habits"><span class="sub">Привычки</span><div style="display:flex;align-items:baseline;gap:4px"><span class="big">' + hd + '</span><span class="sub">из ' + hs.length + '</span></div>' +
     '<div style="display:flex;gap:6px;flex-wrap:wrap">' + hs.map(function (x) { return '<i style="width:14px;height:14px;border-radius:5px;display:block;background:' + (hDone(x, T) ? (x.color || '#FF4D6D') : '#2A2A2E') + '"></i>'; }).join('') + '</div></button>' +
-    '<button class="tile" data-a="tab" data-v="fit"><span class="sub">Цель · ' + fmt(gw, 1) + ' кг</span><span class="big">' + Math.round(prog * 100) + '%</span>' +
+    '<button class="tile" data-a="tab" data-v="fit" data-fit="body"><span class="sub">Цель · ' + fmt(gw, 1) + ' кг</span><span class="big">' + Math.round(prog * 100) + '%</span>' +
     '<div style="display:flex;flex-direction:column;gap:6px">' + bar(Math.max(prog, .02), 'var(--gold)') + '<span style="font-size:12px" class="mut">' + (cw > gw ? 'осталось ' + fmt(cw - gw, 1) + ' кг' : 'цель взята!') + '</span></div></button>' +
+    '<button class="tile" style="min-height:140px" data-a="tab" data-v="more" data-more="tasks"><span class="sub">Задачи</span><div style="display:flex;align-items:baseline;gap:6px"><span class="big" style="color:' + (dueT ? 'var(--orange)' : '#fff') + '">' + dueT + '</span><span class="sub">на сегодня</span></div><span style="font-size:12px" class="mut">всего открыто: ' + openT.length + '</span></button>' +
+    '<button class="tile" style="min-height:140px" data-a="tab" data-v="more" data-more="music"><span class="sub">Музыка</span><div style="display:flex;align-items:baseline;gap:6px"><span class="big" style="color:var(--violet)">' + workTr.length + '</span><span class="sub">в работе</span></div><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" class="mut">' + (workTr[0] ? esc(workTr[0].name) + ' · ' + STAGES[stIdx(workTr[0])] : (tracksAll().length ? 'релизов: ' + tracksAll().length : 'добавь первый трек')) + '</span></button>' +
     '</div>';
   return h;
 }
@@ -639,6 +760,7 @@ function habitRow(x, D, off) {
   var subt;
   if (x.type === 'weight') subt = IX.w[D] ? fmt(num(IX.w[D].weight), 1) + ' кг' : 'нажми, чтобы записать вес';
   else if (x.type === 'food') { var fn = (IX.food[D] || []).length; subt = (fn >= g ? 'записей: ' + fn : fn + ' из ' + g + ' записей') + ' · само'; }
+  else if (isGym(x) && IX.wk[D]) subt = 'тренировка записана · само';
   else if (x.type === 'count') subt = v + ' из ' + g + ' ' + esc(x.unit || '');
   else subt = sk ? 'серия ' + sk + ' ' + plural(sk, 'день', 'дня', 'дней') : 'серия 0';
   subt += ' · +' + fmt(num(x.xp)) + ' XP';
@@ -661,9 +783,9 @@ function habitRow(x, D, off) {
 }
 
 /* ----- фитнес ----- */
-function vFit(r) {
+function vBody(r) {
   var ws = sortedWeights(), lw = ws[ws.length - 1], sw = num(st('startWeight', 0)), gw = num(st('goalWeight', 0));
-  var h = '<div class="hdr"><h1 class="h1">Фитнес</h1><button class="rbtn fill" style="background:#fff" data-a="wNew" aria-label="Записать замер">' + ic('plus', 22, 2.4) + '</button></div>';
+  var h = '';
   var lost = lw && sw ? sw - num(lw.weight) : 0;
   h += '<div class="grid2"><button class="tile" data-a="wNew" style="min-height:150px"><span class="sub">Вес сейчас</span><div style="display:flex;align-items:baseline;gap:4px"><span class="big">' + (lw ? fmt(num(lw.weight), 1) : '—') + '</span><span class="sub">кг</span></div>' +
     '<span style="font-size:13px;color:' + (lost > 0 ? 'var(--green)' : 'var(--mut)') + '">' + (lost > 0.05 ? '−' + fmt(lost, 1) + ' кг от старта' : 'старт ' + fmt(sw, 1) + ' кг') + '</span></button>' +
@@ -682,7 +804,6 @@ function vFit(r) {
     (recent.length ? recent.map(function (w) {
       return '<button class="fi" data-a="wEdit" data-v="' + esc(w.date) + '"><div><div class="n">' + dLong(w.date) + '</div><div class="g">' + [has(w.fat) ? 'жир ' + fmt(num(w.fat), 1) + '%' : '', has(w.waist) ? 'талия ' + fmt(num(w.waist), 1) : ''].filter(Boolean).join(' · ') + '</div></div><span style="font-size:15px;font-weight:600">' + fmt(num(w.weight), 1) + ' кг</span></button>';
     }).join('') : '<p class="sub">Пока нет замеров.</p>') + '</div>';
-  h += '<div class="card soon" style="display:flex;gap:12px;align-items:center"><div class="hico" style="background:rgba(255,255,255,.08)">' + ic('gym', 22) + '</div><div><b style="font-size:15px">Журнал тренировок — следующий этап</b><div class="sub" style="font-size:13px;margin-top:3px">Пока отмечай силовую в привычках.</div></div></div>';
   return h;
 }
 function wChart(ws, goal) {
@@ -711,13 +832,146 @@ function wChart(ws, goal) {
   return s + '</svg>';
 }
 
+/* ----- фитнес: вкладки ----- */
+function vFit(r) {
+  var wkTab = UI.fitTab !== 'body';
+  return '<div class="hdr"><h1 class="h1">Фитнес</h1><button class="rbtn fill" style="background:#fff" data-a="' + (wkTab ? 'exNew' : 'wNew') + '" aria-label="' + (wkTab ? 'Добавить упражнение' : 'Записать замер') + '">' + ic('plus', 22, 2.4) + '</button></div>' +
+    '<div class="seg"><button data-a="fitTab" data-v="wk" class="' + (wkTab ? 'on' : '') + '">Тренировки</button><button data-a="fitTab" data-v="body" class="' + (wkTab ? '' : 'on') + '">Тело</button></div>' +
+    (wkTab ? vWk(r) : vBody(r));
+}
+function dotCal(days) {
+  var T = today(), d0 = pd(T), h = '';
+  for (var k = 2; k >= 0; k--) {
+    var m = new Date(d0.getFullYear(), d0.getMonth() - k, 1), n = new Date(m.getFullYear(), m.getMonth() + 1, 0).getDate(), off = (m.getDay() + 6) % 7, cells = '';
+    for (var i = 0; i < off; i++) cells += '<i style="visibility:hidden"></i>';
+    for (var day = 1; day <= n; day++) {
+      var s = ds(new Date(m.getFullYear(), m.getMonth(), day));
+      cells += '<i class="' + (days[s] ? 'on' : (s > T ? 'fu' : '')) + (s === T ? ' td' : '') + '"></i>';
+    }
+    h += '<div style="display:flex;flex-direction:column;align-items:center;gap:10px"><span style="font-size:13px;font-weight:600;color:' + (k ? 'var(--mut)' : '#fff') + '">' + MCAP[m.getMonth()] + '</span><div class="dots">' + cells + '</div></div>';
+  }
+  return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">' + h + '</div>';
+}
+function vWk(r) {
+  if (srvOld()) return oldCard();
+  var T = today(), D = UI.wkDate || T, stt = r.wk, mon = addD(T, -wd(T)), nWeek = 0, vol = 0, d;
+  for (d = mon; d <= T; d = addD(d, 1)) if (stt.days[d]) nWeek++;
+  var from7 = addD(T, -6), all = wkRows();
+  all.forEach(function (w) { if (w.date >= from7 && w.date <= T) setsParse(w.sets).forEach(function (s) { vol += s.w * s.r; }); });
+  var h = '<div class="grid2">' +
+    '<div class="tile" style="min-height:128px"><span class="sub">На этой неделе</span><span class="big" style="font-size:34px">' + nWeek + '</span><span style="font-size:12px" class="mut">всего тренировок: ' + stt.nDays + '</span></div>' +
+    '<div class="tile" style="min-height:128px"><span class="sub">Объём за 7 дней</span><div style="display:flex;align-items:baseline;gap:4px"><span class="big" style="font-size:' + (vol >= 10000 ? 26 : 34) + 'px">' + fmt(vol) + '</span><span class="sub">кг</span></div><span style="font-size:12px" class="mut">вес × повторы</span></div></div>';
+  h += '<div class="card" style="display:flex;flex-direction:column;gap:14px"><div class="row"><span class="ctitle">Календарь</span><span class="sub" style="font-size:13px">рекордов: ' + stt.prs + '</span></div>' + dotCal(stt.days) + '</div>';
+  var rows = (IX.wk[D] || []).slice().sort(function (a, b) { return cmp(a.added, b.added); });
+  h += '<div class="card" style="padding:6px 18px 18px"><div class="row" style="padding:12px 0 6px"><span class="ctitle">' + (D === T ? 'Сегодня' : dLong(D)) + '</span>' +
+    (D !== T ? '<button class="add-s" data-a="wkDay" data-v="" style="border-color:rgba(255,255,255,.25);color:#fff">К сегодня</button>' : (rows.length ? '<span style="font-size:13px;font-weight:600;color:var(--gold)">+20 XP</span>' : '')) + '</div>';
+  rows.forEach(function (w) {
+    h += '<button class="fi" data-a="exEdit" data-id="' + esc(w.id) + '"><div style="min-width:0"><div class="n">' + esc(w.exercise) + '</div><div class="g">' + setsShow(setsParse(w.sets)) + '</div></div><span class="mut">' + ic('right', 18) + '</span></button>';
+  });
+  if (!rows.length) h += '<p class="sub" style="margin:4px 0 0">Тренировки пока нет. Добавь первое упражнение.</p>';
+  h += '<button class="btn white" data-a="exNew" style="margin-top:14px">' + ic('plus', 20, 2.4) + 'Упражнение</button>';
+  var prev = all.filter(function (w) { return w.date < T; }), lastDate = prev.length ? prev[prev.length - 1].date : '';
+  if (!rows.length && D === T && lastDate) h += '<button class="btn ghost" data-a="exRepeat" data-v="' + lastDate + '" style="margin-top:10px">' + ic('sync', 18) + 'Повторить тренировку от ' + dShort(lastDate) + '</button>';
+  h += '</div>';
+  var recs = Object.keys(stt.best).map(function (k) { return stt.best[k]; }).sort(function (a, b) { return b.n - a.n || cmp(a.name, b.name); }).slice(0, 10);
+  if (recs.length) {
+    h += '<div class="card" style="padding:6px 18px 10px"><div class="row" style="padding:12px 0 4px"><span class="ctitle">Рекорды</span><span class="sub" style="font-size:13px">лучший вес</span></div>' +
+      recs.map(function (b) { return '<div class="fi" style="min-height:44px"><div style="min-width:0"><div class="n">' + esc(b.name) + '</div><div class="g">' + dShort(b.date) + '</div></div><span style="font-size:15px;font-weight:600;white-space:nowrap">' + bestShow(b) + '</span></div>'; }).join('') + '</div>';
+  }
+  var dates = Object.keys(stt.days).filter(function (x) { return x !== D; }).sort().reverse().slice(0, 8);
+  if (dates.length) {
+    h += '<div class="card" style="padding:6px 18px 10px"><div class="row" style="padding:12px 0 4px"><span class="ctitle">История</span><span class="sub" style="font-size:13px">нажми, чтобы открыть</span></div>' +
+      dates.map(function (x) {
+        var names = (IX.wk[x] || []).map(function (w) { return w.exercise; });
+        return '<button class="fi" data-a="wkDay" data-v="' + x + '"><div style="min-width:0"><div class="n">' + dLong(x) + ', ' + WDL[wd(x)] + '</div><div class="g" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(names.join(', ')) + '</div></div><span class="mut" style="font-size:13px;white-space:nowrap">' + names.length + ' упр.</span></button>';
+      }).join('') + '</div>';
+  }
+  return h;
+}
+
 /* ----- музыка и задачи ----- */
-function vMore() {
+function vMore(r) {
   var m = UI.more === 'tasks';
-  var h = '<div class="hdr"><h1 class="h1">' + (m ? 'Задачи' : 'Музыка') + '</h1></div>' +
+  var h = '<div class="hdr"><h1 class="h1">' + (m ? 'Задачи' : 'Музыка') + '</h1><button class="rbtn fill" style="background:' + (m ? 'var(--orange)' : 'var(--violet)') + '" data-a="' + (m ? 'tNew' : 'trNew') + '" aria-label="' + (m ? 'Новая задача' : 'Новый трек') + '">' + ic('plus', 22, 2.4) + '</button></div>' +
     '<div class="seg"><button data-a="more" data-v="music" class="' + (m ? '' : 'on') + '">Музыка</button><button data-a="more" data-v="tasks" class="' + (m ? 'on' : '') + '">Задачи</button></div>';
-  if (!m) h += '<div class="card soon" style="display:flex;flex-direction:column;gap:12px"><div class="hico" style="background:rgba(167,139,250,.16);color:var(--violet)">' + ic('music', 22) + '</div><b class="disp" style="font-size:18px">Скоро</b><span class="sub" style="line-height:1.5">Треки по этапам: идея → демо → запись → сведение → мастеринг → релиз, чек-листы и XP за каждый этап. Это следующий этап сборки.</span></div>';
-  else h += '<div class="card soon" style="display:flex;flex-direction:column;gap:12px"><div class="hico" style="background:rgba(251,146,60,.16);color:var(--orange)">' + ic('task', 22) + '</div><b class="disp" style="font-size:18px">Скоро</b><span class="sub" style="line-height:1.5">Личные задачи с приоритетами, сроками и XP — как в рабочем трекере, только для себя. Следующий этап сборки.</span></div>';
+  if (srvOld()) return h + oldCard();
+  return h + (m ? vTasks() : vMusic());
+}
+function taskRow(t) {
+  var done = taskDone(t), over = !done && isDate(t.due) && t.due < today();
+  var meta = ['<b style="color:var(--orange)">' + esc(t.prio || 'P2') + '</b>'];
+  if (has(t.tag)) meta.push(esc(t.tag));
+  if (done && isDate(t.doneAt)) meta.push('сдано ' + dueLbl(t.doneAt));
+  else if (isDate(t.due)) meta.push(over ? '<b style="color:#FF8FA3">' + dueLbl(t.due) + '</b>' : dueLbl(t.due));
+  return '<div class="tk"' + (done ? ' style="opacity:.6"' : '') + '><button class="tck' + (done ? ' on' : '') + '" data-a="tTog" data-id="' + esc(t.id) + '" aria-label="' + (done ? 'Вернуть в работу' : 'Выполнить') + '">' + (done ? ic('check', 20, 3) : '') + '</button>' +
+    '<button class="htxt" data-a="tEdit" data-id="' + esc(t.id) + '"><b' + (done ? ' style="text-decoration:line-through;font-weight:500"' : '') + '>' + esc(t.title) + '</b><span>' + meta.join(' · ') + '</span></button>' +
+    '<span style="font-size:13px;font-weight:600;color:var(--gold);flex-shrink:0">+' + (done ? taskXp(t) : taskPot(t)) + '</span></div>';
+}
+function vTasks() {
+  var T = today(), we = addD(T, 6 - wd(T)), all = tasksAll();
+  var open = all.filter(function (t) { return !taskDone(t); }).sort(function (a, b) { return cmp(a.prio || 'P2', b.prio || 'P2') || cmp(a.due || '9999', b.due || '9999') || cmp(a.created, b.created); });
+  var over = open.filter(function (t) { return isDate(t.due) && t.due < T; });
+  var tod = open.filter(function (t) { return t.due === T; });
+  var week = open.filter(function (t) { return isDate(t.due) && t.due > T && t.due <= we; });
+  var later = open.filter(function (t) { return !isDate(t.due) || t.due > we; });
+  var done = all.filter(taskDone).sort(function (a, b) { return cmp(b.doneAt, a.doneAt); });
+  function cnt(n, label, color) { return '<div style="background:var(--card);border:1px solid var(--line);border-radius:22px;padding:14px;display:flex;flex-direction:column;gap:6px"><span class="disp" style="font-size:26px;font-weight:600;color:' + color + '">' + n + '</span><span style="font-size:12px" class="mut">' + label + '</span></div>'; }
+  function sec(title, list) { return list.length ? '<span class="sec">' + title + '</span><div style="display:flex;flex-direction:column;gap:10px">' + list.map(taskRow).join('') + '</div>' : ''; }
+  var h = '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px">' + cnt(tod.length, 'на сегодня', 'var(--orange)') + cnt(week.length, 'на неделе', '#fff') + cnt(over.length, 'просрочено', over.length ? '#FF8FA3' : '#fff') + '</div>';
+  h += sec('Просрочено', over) + sec('Сегодня', tod) + sec('На неделе', week) + sec('Позже и без срока', later);
+  if (!open.length) h += '<div class="card soon sub" style="line-height:1.5">' + (done.length ? 'Все задачи закрыты.' : 'Задач пока нет.') + ' Нажми «+», чтобы добавить.</div>';
+  if (done.length) {
+    h += '<button class="btn ghost" data-a="tDone">' + (UI.showDone ? 'Скрыть готовые' : 'Готовые · ' + done.length) + '</button>';
+    if (UI.showDone) h += '<div style="display:flex;flex-direction:column;gap:10px">' + done.slice(0, 20).map(taskRow).join('') + '</div>';
+  }
+  return h;
+}
+function trackCard(t) {
+  var i = stIdx(t), cl = clParse(t.checklist), dn = cl.filter(function (x) { return x.d; }).length, id = esc(t.id), segs = '';
+  for (var k = 0; k < 6; k++) segs += '<i style="display:block;height:6px;border-radius:3px;background:' + (k < i ? '#A78BFA' : (k === i ? '#6D5BA8' : '#2A2A2E')) + '"></i>';
+  var h = '<div class="card" style="display:flex;flex-direction:column;gap:14px"><div class="row" style="align-items:flex-start">' +
+    '<button class="htxt" data-a="trEdit" data-id="' + id + '"><b class="disp" style="font-size:18px">' + esc(t.name) + '</b><span style="font-size:13px">' + (has(t.note) ? esc(t.note) : 'нажми, чтобы изменить') + '</span></button>' +
+    '<span style="font-size:12px;font-weight:600;color:#000;background:var(--violet);border-radius:999px;padding:6px 10px;white-space:nowrap">' + STAGES[i] + '</span></div>' +
+    '<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px">' + segs + '</div>';
+  if (cl.length) h += '<div style="display:flex;flex-direction:column;gap:2px">' + cl.map(function (x, n) {
+    return '<button class="cl' + (x.d ? ' on' : '') + '" data-a="trCk" data-id="' + id + '" data-i="' + n + '"><span class="bx">' + (x.d ? ic('check', 14, 3.5) : '') + '</span><span class="t">' + esc(x.t) + '</span></button>';
+  }).join('') + '</div>';
+  h += '<div class="row"><span class="sub" style="font-size:13px">' + (cl.length ? dn + ' из ' + cl.length : 'чек-лист пуст') + '</span>' +
+    '<button class="add-s" style="border-color:rgba(167,139,250,.5);color:var(--violet)" data-a="trNext" data-id="' + id + '">' + ic('right', 16, 2.4) + STAGES[i + 1] + ' · +' + (i + 1 === 5 ? 140 : 40) + '</button></div></div>';
+  return h;
+}
+function vMusic() {
+  var all = tracksAll();
+  var work = all.filter(function (t) { return stIdx(t) < 5; }).sort(function (a, b) { return cmp(b.updated, a.updated); });
+  var rel = all.filter(function (t) { return stIdx(t) === 5; }).sort(function (a, b) { return cmp(b.updated, a.updated); });
+  var h = '<div style="background:#1A1426;border-radius:28px;padding:18px;display:flex;flex-direction:column;gap:14px"><div class="row"><span class="ctitle">Конвейер</span><span style="font-size:13px;color:#C4B5FD">в работе: ' + work.length + '</span></div>' +
+    '<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px">' + STAGES.map(function (s, i) {
+      var n = all.filter(function (t) { return stIdx(t) === i; }).length;
+      return '<div style="display:flex;flex-direction:column;align-items:center;gap:6px;border-radius:14px;padding:10px 2px;background:' + (n ? '#A78BFA' : '#261D38') + ';color:' + (n ? '#000' : '#C4B5FD') + '"><span class="disp" style="font-size:18px;font-weight:600' + (n ? '' : ';color:#6B5B8A') + '">' + n + '</span><span style="font-size:10px;font-weight:' + (n ? 600 : 400) + '">' + SSHORT[i] + '</span></div>';
+    }).join('') + '</div></div>';
+  h += work.map(trackCard).join('');
+  if (!all.length) h += '<div class="card soon sub" style="line-height:1.5">Треков пока нет. Нажми «+» и добавь первый — например, тот, что сейчас в работе.</div>';
+  if (rel.length) h += '<span class="sec">Релизы</span><div class="card" style="padding:6px 18px">' + rel.map(function (t) {
+    return '<button class="fi" data-a="trEdit" data-id="' + esc(t.id) + '"><div style="min-width:0"><div class="n">' + esc(t.name) + '</div><div class="g">' + (isDate(t.updated) ? 'вышел ' + dShort(t.updated) : 'релиз') + '</div></div><span style="color:var(--violet)">' + ic('medal', 20) + '</span></button>';
+  }).join('') + '</div>';
+  return h;
+}
+
+function exList(q) {
+  var k = lc(q), rows = wkRows(), seen = {}, rec = [], h = '', names = {}, list = [];
+  function row(name, sub) { return '<button class="pi" data-a="exPick" data-v="' + esc(name) + '"><div style="min-width:0"><div class="n">' + esc(name) + '</div>' + (sub ? '<div class="g">' + sub + '</div>' : '') + '</div>' + ic('right', 18) + '</button>'; }
+  function sub(name, group) { var l = lastOf(name); return l ? dShort(l.date) + ': ' + setsShow(setsParse(l.sets)) : esc(group || ''); }
+  S.exercises.forEach(function (e) { if (has(e.name) && !names[lc(e.name)]) { names[lc(e.name)] = 1; list.push({ name: String(e.name), group: e.group }); } });
+  rows.forEach(function (w) { if (!names[lc(w.exercise)]) { names[lc(w.exercise)] = 1; list.push({ name: w.exercise, group: '' }); } });
+  if (!k) {
+    rows.slice().reverse().forEach(function (w) { var n = lc(w.exercise); if (!seen[n] && rec.length < 6) { seen[n] = 1; rec.push(w.exercise); } });
+    if (rec.length) h += '<div class="lbl" style="margin:4px 0 2px">Недавние</div>' + rec.map(function (n) { return row(n, sub(n)); }).join('');
+    h += '<div class="lbl" style="margin:14px 0 2px">Все упражнения</div>' + list.sort(function (a, b) { return cmp(lc(a.group), lc(b.group)) || cmp(lc(a.name), lc(b.name)); }).map(function (e) { return row(e.name, esc(e.group || '')); }).join('');
+    return h;
+  }
+  var m = list.filter(function (e) { return lc(e.name).indexOf(k) >= 0; });
+  h += m.map(function (e) { return row(e.name, sub(e.name, e.group)); }).join('');
+  if (!m.some(function (e) { return lc(e.name) === k; })) h += '<button class="pi act" data-a="exNewName">' + ic('plus', 18) + '<span style="flex-grow:1">Новое упражнение «' + esc(q.trim()) + '»</span></button>';
   return h;
 }
 
@@ -803,12 +1057,53 @@ function renderSheet() {
       '<div style="display:flex;align-items:center;gap:16px"><div class="ring" style="width:96px;height:96px">' + ring(96, 9, L.frac, '#FFC53D') + '<div class="disp" style="font-size:32px;font-weight:700;color:var(--gold)">' + L.n + '</div></div>' +
       '<div><div class="disp" style="font-size:20px;font-weight:600">' + esc(lname(L.n)) + '</div><div class="sub" style="margin-top:4px">' + fmt(r.xp) + ' XP · до ' + (L.n + 1) + '-го ещё ' + fmt(L.left) + '</div></div></div>' +
       '<span class="lbl">Как начисляются очки</span><div class="card" style="padding:14px 16px;font-size:14px;line-height:1.6;color:#E4E4E7">' +
-      'Каждая выполненная привычка — её XP (видно в строке привычки).<br>День в коридоре калорий (норма ± ' + fmt(corridor()) + ') — +15.<br>Каждый сброшенный килограмм от старта — +30.<br>Серия — дни подряд, где закрыто не меньше 80% привычек.<br><span class="mut">Отменил отметку или удалил запись — очки уходят.</span></div>' +
+      'Каждая выполненная привычка — её XP (видно в строке привычки).<br>День в коридоре калорий (норма ± ' + fmt(corridor()) + ') — +15.<br>Каждый сброшенный килограмм от старта — +30.<br>Тренировка в журнале — +20, новый рекорд — +10.<br>Задача: P1 +25, P2 +15, P3 +10; сдал в срок — в полтора раза больше.<br>Трек: +40 за каждый этап, +100 за релиз, +5 за пункт чек-листа.<br>Серия — дни подряд, где закрыто не меньше 80% привычек.<br><span class="mut">Отменил отметку или удалил запись — очки уходят.</span></div>' +
       '<span class="lbl">Значки</span><div class="badges">' + badgeList(r).map(function (b) {
         return '<div class="bdg' + (b.ok ? '' : ' no') + '"><div class="hico" style="width:36px;height:36px;border-radius:11px;background:' + alpha(b.c, .16) + ';color:' + b.c + '">' + ic('medal', 20) + '</div><div style="min-width:0"><b style="font-size:13px">' + esc(b.t) + '</b><div class="sub" style="font-size:12px">' + esc(b.d) + '</div></div></div>';
       }).join('') + '</div>' +
       '<span class="lbl">Лестница</span><div>' + lad + '</div>' +
       '<span class="sub" style="font-size:12px">Названия уровней меняются на листе «Уровни» в таблице.</span>';
+  } else if (s.type === 'task') {
+    var T0 = today(), dues = [['Сегодня', T0], ['Завтра', addD(T0, 1)], ['Без срока', '']];
+    var tags = {}; S.tasks.forEach(function (t) { if (has(t.tag)) tags[String(t.tag).trim()] = 1; });
+    h = sheetHead(d.id ? 'Задача' : 'Новая задача') + fld('Что сделать', 'title', d.title, 'autocomplete="off" placeholder="Например, купить продукты на неделю"') +
+      '<span class="lbl">Приоритет</span><div class="seg">' + [['P1', 'Важно · +25'], ['P2', 'Обычно · +15'], ['P3', 'Мелочь · +10']].map(function (p) { return '<button data-a="tPrio" data-v="' + p[0] + '" class="' + (d.prio === p[0] ? 'on' : '') + '">' + p[1] + '</button>'; }).join('') + '</div>' +
+      '<span class="lbl">Срок</span><div class="chips">' + dues.map(function (x) { return '<button class="gchip" data-a="tDue" data-v="' + x[1] + '" style="' + ((d.due || '') === x[1] ? 'background:#2A2A2E;border-color:#fff' : '') + '">' + x[0] + '</button>'; }).join('') + '</div>' +
+      '<input class="inp" type="date" data-f="due" aria-label="Срок" value="' + esc(isDate(d.due) ? d.due : '') + '">' +
+      '<span class="sub" style="font-size:12px;margin-top:-6px">Сдал в срок — очков в полтора раза больше.</span>' +
+      fld('Раздел (необязательно)', 'tag', d.tag, 'autocomplete="off" list="tr-tags" placeholder="дом, здоровье, учёба"') +
+      '<datalist id="tr-tags">' + Object.keys(tags).map(function (x) { return '<option value="' + esc(x) + '">'; }).join('') + '</datalist>' +
+      fld('Заметка', 'note', d.note, 'autocomplete="off"') +
+      '<button class="btn" style="background:var(--orange);color:#000" data-a="tSave">Сохранить</button>' +
+      (d.id ? '<button class="btn danger" data-a="tDel">' + ic('trash', 18) + 'Удалить</button>' : '');
+  } else if (s.type === 'track') {
+    h = sheetHead(d.id ? 'Трек' : 'Новый трек') + fld('Название', 'name', d.name, 'autocomplete="off"') +
+      '<span class="lbl">Этап</span><div class="chips">' + STAGES.map(function (x) { return '<button class="gchip" data-a="trStage" data-v="' + x + '" style="' + (d.stage === x ? 'background:var(--violet);border-color:var(--violet);color:#000' : '') + '">' + x + '</button>'; }).join('') + '</div>' +
+      '<span class="lbl">Чек-лист</span>' +
+      (d.items.length ? '<div>' + d.items.map(function (x, i) { return '<div class="row" style="min-height:44px;border-bottom:1px solid var(--line)"><span style="font-size:15px;' + (x.d ? 'color:var(--mut);text-decoration:line-through' : '') + '">' + esc(x.t) + '</span><button class="x" data-a="trClDel" data-i="' + i + '" aria-label="Убрать пункт">' + ic('x', 18) + '</button></div>'; }).join('') + '</div>' : '') +
+      '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px"><input id="tr-new" class="inp" data-f="newItem" autocomplete="off" aria-label="Новый пункт" placeholder="Например, свести вокал" value="' + esc(d.newItem || '') + '"><button class="gchip" style="height:50px" data-a="trClAdd">Добавить</button></div>' +
+      fld('Заметка', 'note', d.note, 'autocomplete="off" placeholder="жанр, с кем, ссылка"') +
+      '<button class="btn" style="background:var(--violet);color:#000" data-a="trSave">Сохранить</button>' +
+      (d.id ? '<button class="btn danger" data-a="trDel">' + ic('trash', 18) + 'Удалить трек</button>' : '');
+  } else if (s.type === 'expick') {
+    h = sheetHead('Упражнение · ' + (d.date === today() ? 'сегодня' : dShort(d.date))) +
+      '<input id="eq" class="inp" data-in="eq" placeholder="Поиск или новое название" autocomplete="off" value="' + esc(d.q || '') + '">' +
+      '<div id="elist">' + exList(d.q || '') + '</div>';
+  } else if (s.type === 'sets') {
+    h = sheetHead(esc(d.name)) +
+      (d.last ? '<span class="sub" style="margin-top:-6px">Прошлый раз, ' + dShort(d.last.date) + ': ' + setsShow(setsParse(d.last.sets)) + '</span>' : '<span class="sub" style="margin-top:-6px">Первый раз — впиши, как получилось.</span>') +
+      '<div class="field"><label>Дата</label><input class="inp" type="date" data-f="date" value="' + esc(d.date) + '" max="' + today() + '"></div>' +
+      '<div class="setr" style="font-size:13px;color:var(--mut)"><span style="text-align:center">№</span><span>Вес, кг</span><span>Повторы</span><span></span></div>' +
+      d.sets.map(function (x, i) {
+        return '<div class="setr"><span class="mut" style="text-align:center">' + (i + 1) + '</span>' +
+          '<input class="inp" data-s="w" data-i="' + i + '" inputmode="decimal" autocomplete="off" aria-label="Вес, подход ' + (i + 1) + '" placeholder="—" value="' + esc(x.w) + '">' +
+          '<input class="inp" data-s="r" data-i="' + i + '" inputmode="numeric" autocomplete="off" aria-label="Повторы, подход ' + (i + 1) + '" placeholder="0" value="' + esc(x.r) + '">' +
+          '<button class="x" data-a="setDel" data-i="' + i + '" aria-label="Убрать подход">' + ic('x', 18) + '</button></div>';
+      }).join('') +
+      '<button class="btn ghost" data-a="setAdd">' + ic('plus', 18, 2.4) + 'Подход</button>' +
+      '<span class="sub" style="font-size:12px;margin-top:-6px">Без веса (отжимания, планка) — поле веса оставь пустым.</span>' +
+      '<button class="btn white" data-a="exSave">' + (d.editId ? 'Сохранить' : 'Записать') + '</button>' +
+      (d.editId ? '<button class="btn danger" data-a="exDel">' + ic('trash', 18) + 'Удалить</button>' : '');
   }
   $('sheet-root').innerHTML = '<div class="backdrop" data-a="close"></div><div class="sheet" role="dialog" aria-modal="true">' + h + '</div>';
 }
@@ -855,7 +1150,7 @@ function gramsRes() {
 
 /* ---------- действия ---------- */
 var A = {
-  tab: function (el) { UI.tab = el.dataset.v; LS.set('tr_tab', UI.tab); if (UI.tab === 'food' && !UI.foodDate) UI.foodDate = today(); render(); window.scrollTo(0, 0); },
+  tab: function (el) { UI.tab = el.dataset.v; LS.set('tr_tab', UI.tab); if (el.dataset.more) { UI.more = el.dataset.more; LS.set('tr_more', UI.more); } if (el.dataset.fit) { UI.fitTab = el.dataset.fit; LS.set('tr_fit', UI.fitTab); } if (UI.tab === 'food' && !UI.foodDate) UI.foodDate = today(); render(); window.scrollTo(0, 0); },
   syncNow: function () { sync(); },
   connect: function () {
     var url = $('c-url').value.trim(), key = $('c-key').value.trim(), err = $('c-err');
@@ -1005,7 +1300,110 @@ var A = {
     closeSheet(); act(function () { push({ op: 'weight.delete', date: o }); });
   },
   fitR: function (el) { UI.fitRange = +el.dataset.v; render(); },
-  more: function (el) { UI.more = el.dataset.v; render(); },
+  more: function (el) { UI.more = el.dataset.v; LS.set('tr_more', UI.more); render(); },
+  /* задачи */
+  tNew: function () { if (srvOld()) { toast('Сначала обнови сервер', true); return; } openSheet('task', { title: '', prio: 'P2', due: '', tag: '', note: '' }); },
+  tEdit: function (el) { var t = byId(S.tasks, el.dataset.id); if (!t) return; openSheet('task', { id: String(t.id), title: t.title, prio: t.prio || 'P2', due: isDate(t.due) ? t.due : '', tag: t.tag || '', note: t.note || '' }); },
+  tPrio: function (el) { UI.sheet.data.prio = el.dataset.v; renderSheet(); },
+  tDue: function (el) { UI.sheet.data.due = el.dataset.v; renderSheet(); },
+  tDone: function () { UI.showDone = !UI.showDone; render(); },
+  tSave: function () {
+    var d = UI.sheet.data, title = String(d.title || '').trim();
+    if (!title) { toast('Напиши, что сделать', true); return; }
+    var item = { id: d.id || uid(), title: title, prio: d.prio || 'P2', due: isDate(d.due) ? d.due : '', tag: String(d.tag || '').trim(), note: String(d.note || '').trim() };
+    if (!d.id) { item.status = 'Очередь'; item.doneAt = ''; item.created = today(); }
+    closeSheet(); act(function () { push({ op: 'task.save', item: item }); });
+  },
+  tDel: function () { var id = UI.sheet.data.id; if (!id || !confirm('Удалить задачу?')) return; closeSheet(); act(function () { push({ op: 'task.delete', id: id }); }); },
+  tTog: function (el) {
+    var t = byId(S.tasks, el.dataset.id); if (!t) return;
+    var done = taskDone(t);
+    act(function () { push({ op: 'task.save', item: { id: String(t.id), status: done ? 'Очередь' : 'Готово', doneAt: done ? '' : today() } }); });
+  },
+  /* музыка */
+  trNew: function () { if (srvOld()) { toast('Сначала обнови сервер', true); return; } openSheet('track', { name: '', stage: 'Идея', items: [], note: '', newItem: '' }); },
+  trEdit: function (el) { var t = byId(S.tracks, el.dataset.id); if (!t) return; openSheet('track', { id: String(t.id), name: t.name, stage: STAGES[stIdx(t)], items: clParse(t.checklist), note: t.note || '', newItem: '' }); },
+  trStage: function (el) { UI.sheet.data.stage = el.dataset.v; renderSheet(); },
+  trClAdd: function () {
+    var d = UI.sheet.data, x = String(d.newItem || '').trim();
+    if (!x) return;
+    d.items.push({ d: false, t: x }); d.newItem = ''; renderSheet();
+    var i = $('tr-new'); if (i) i.focus();
+  },
+  trClDel: function (el) { UI.sheet.data.items.splice(+el.dataset.i, 1); renderSheet(); },
+  trSave: function () {
+    var d = UI.sheet.data, name = String(d.name || '').trim(), extra = String(d.newItem || '').trim();
+    if (!name) { toast('Напиши название', true); return; }
+    if (extra) d.items.push({ d: false, t: extra });
+    var item = { id: d.id || uid(), name: name, stage: d.stage || 'Идея', checklist: clStr(d.items), note: String(d.note || '').trim(), updated: today() };
+    if (!d.id) item.created = today();
+    closeSheet(); act(function () { push({ op: 'track.save', item: item }); });
+  },
+  trDel: function () { var id = UI.sheet.data.id; if (!id || !confirm('Удалить трек?')) return; closeSheet(); act(function () { push({ op: 'track.delete', id: id }); }); },
+  trNext: function (el) {
+    var t = byId(S.tracks, el.dataset.id); if (!t) return;
+    var i = stIdx(t); if (i >= 5) return;
+    if (i + 1 === 5 && !confirm('Трек «' + t.name + '» вышел?')) return;
+    act(function () { push({ op: 'track.save', item: { id: String(t.id), stage: STAGES[i + 1], updated: today() } }); });
+  },
+  trCk: function (el) {
+    var t = byId(S.tracks, el.dataset.id); if (!t) return;
+    var cl = clParse(t.checklist), x = cl[+el.dataset.i]; if (!x) return;
+    x.d = !x.d;
+    act(function () { push({ op: 'track.save', item: { id: String(t.id), checklist: clStr(cl), updated: today() } }); });
+  },
+  /* тренировки */
+  fitTab: function (el) { UI.fitTab = el.dataset.v; LS.set('tr_fit', UI.fitTab); render(); },
+  wkDay: function (el) { UI.wkDate = el.dataset.v || null; render(); window.scrollTo(0, 0); },
+  exNew: function () {
+    if (srvOld()) { toast('Сначала обнови сервер', true); return; }
+    openSheet('expick', { date: UI.wkDate || today(), q: '' });
+  },
+  exOpen: function (name) {
+    var d = UI.sheet.data, last = lastOf(name);
+    openSheet('sets', { date: d.date, name: name, last: last, sets: last ? setsParse(last.sets).map(function (x) { return { w: x.w || '', r: x.r }; }) : [{ w: '', r: '' }] });
+  },
+  exPick: function (el) { A.exOpen(el.dataset.v); },
+  exNewName: function () { var n = String(UI.sheet.data.q || '').trim(); if (n) A.exOpen(n); },
+  exEdit: function (el) {
+    var w = byId(S.workouts, el.dataset.id); if (!w) return;
+    var ss = setsParse(w.sets).map(function (x) { return { w: x.w || '', r: x.r }; });
+    openSheet('sets', { editId: String(w.id), date: w.date, name: w.exercise, last: lastOf(w.exercise, w.id), sets: ss.length ? ss : [{ w: '', r: '' }] });
+  },
+  setAdd: function () { var a = UI.sheet.data.sets, l = a[a.length - 1] || { w: '', r: '' }; a.push({ w: l.w, r: l.r }); renderSheet(); },
+  setDel: function (el) { var a = UI.sheet.data.sets; a.splice(+el.dataset.i, 1); if (!a.length) a.push({ w: '', r: '' }); renderSheet(); },
+  exSave: function () {
+    var d = UI.sheet.data;
+    var sets = d.sets.map(function (x) { return { w: Math.max(0, num(x.w)), r: Math.round(num(x.r)) }; }).filter(function (x) { return x.r > 0; });
+    if (!sets.length) { toast('Впиши хотя бы один подход с повторами', true); return; }
+    if (!isDate(d.date) || d.date > today()) { toast('Проверь дату', true); return; }
+    var item = { id: d.editId || uid(), date: d.date, exercise: d.name, sets: setsStr(sets) };
+    if (!d.editId) item.added = new Date().toISOString();
+    var known = S.exercises.some(function (e) { return lc(e.name) === lc(d.name); });
+    var before = wkStats().prs, name = d.name;
+    UI.wkDate = d.date === today() ? null : d.date;
+    closeSheet();
+    act(function () {
+      if (!known) push({ op: 'exercise.save', item: { name: name, group: '' } });
+      push({ op: 'wk.save', item: item });
+    });
+    var after = wkStats();
+    if (after.prs > before && !$('modal-root').innerHTML) {
+      var b = after.best[lc(name)];
+      modal('<div class="hico" style="width:84px;height:84px;border-radius:26px;background:rgba(255,197,61,.16);color:var(--gold)">' + ic('medal', 44) + '</div>' +
+        '<div class="lbl" style="color:var(--gold)">Новый рекорд · +10 XP</div><div class="disp" style="font-size:20px;font-weight:600">' + esc(name) + '</div>' +
+        '<div class="sub">' + (b ? bestShow(b) : '') + '</div><button class="btn white" data-a="closeModal" style="margin-top:6px">Дальше</button>');
+    }
+  },
+  exDel: function () { var id = UI.sheet.data.editId; if (!id || !confirm('Удалить запись?')) return; closeSheet(); act(function () { push({ op: 'wk.delete', id: id }); }); },
+  exRepeat: function (el) {
+    var src = wkRows().filter(function (w) { return w.date === el.dataset.v; }), T = today(), base = Date.now();
+    if (!src.length) return;
+    act(function () {
+      src.forEach(function (w, i) { push({ op: 'wk.save', item: { id: uid(), date: T, exercise: w.exercise, sets: w.sets, added: new Date(base + i).toISOString() } }); });
+    });
+    toast('Скопировано — поправь веса и повторы', true);
+  },
   /* настройки */
   sSex: function (el) { UI.sheet.data.sex = el.dataset.v; renderSheet(); },
   sAct: function (el) { UI.sheet.data.activity = +el.dataset.v; renderSheet(); },
@@ -1044,11 +1442,14 @@ document.addEventListener('input', function (e) {
   var el = e.target;
   if (!UI.sheet) return;
   if (el.dataset.f) { UI.sheet.data[el.dataset.f] = el.value; return; }
+  if (el.dataset.s) { var row = UI.sheet.data.sets[+el.dataset.i]; if (row) row[el.dataset.s] = el.value; return; }
+  if (el.dataset.in === 'eq') { UI.sheet.data.q = el.value; $('elist').innerHTML = exList(el.value); }
   if (el.dataset.in === 'fq') { UI.sheet.data.q = el.value; $('flist').innerHTML = prodList(el.value); }
   if (el.dataset.in === 'fg') { UI.sheet.data.grams = el.value; $('fres').innerHTML = gramsRes(); }
 });
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Enter' && e.target.id === 'fg') { e.preventDefault(); A.saveFood(); }
+  if (e.key === 'Enter' && e.target.id === 'tr-new') { e.preventDefault(); A.trClAdd(); }
   if (e.key === 'Escape' && UI.sheet) closeSheet();
 });
 window.addEventListener('online', function () { scheduleSync(300); });
