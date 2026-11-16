@@ -124,6 +124,12 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 .cl.on .bx{border:none;background:var(--violet);color:#000}
 .cl.on .t{color:var(--mut);text-decoration:line-through}
 .setr{display:grid;grid-template-columns:28px minmax(0,1fr) minmax(0,1fr) 40px;gap:8px;align-items:center}
+.calg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cd{min-height:48px;border-radius:14px;border:1px solid transparent;background:var(--card);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0;font-size:14px}
+.cd.sel{background:#2E2E33}
+.cd.td{border-color:#fff}
+.cd span.dots2{display:flex;gap:3px;height:5px}
+.cd i{width:5px;height:5px;border-radius:50%;display:block}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes up{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes pop{from{transform:scale(.8);opacity:0}to{transform:scale(1);opacity:1}}
@@ -137,7 +143,7 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 <input type="file" id="cam" accept="image/*" hidden>
 <script>
 'use strict';
-var VERSION = '2.3';
+var VERSION = '2.5';
 
 /* ---------- хранилище в браузере ---------- */
 var LS = {
@@ -150,7 +156,7 @@ var S = LS.get('tr_cache', null) || emptyState();
 ['tasks', 'tracks', 'workouts', 'exercises', 'steps'].forEach(function (k) { if (!S[k]) S[k] = []; });
 var SRV = LS.get('tr_srv', '');
 var Q = LS.get('tr_queue', []);
-var UI = { tab: LS.get('tr_tab', 'home'), foodDate: null, habitBack: 0, fitRange: 30, more: LS.get('tr_more', 'music'), fitTab: LS.get('tr_fit', 'wk'), wkDate: null, showDone: false, sheet: null };
+var UI = { taskView: LS.get('tr_tv', 'list'), calDay: null, calYM: null, tab: LS.get('tr_tab', 'home'), foodDate: null, habitBack: 0, fitRange: 30, more: LS.get('tr_more', 'music'), fitTab: LS.get('tr_fit', 'wk'), wkDate: null, showDone: false, sheet: null };
 var SYNC = { busy: false, again: false, last: LS.get('tr_last', 0), err: '', timer: null };
 var IX = null;
 
@@ -297,10 +303,12 @@ function cmp(a, b) { a = String(a == null ? '' : a); b = String(b == null ? '' :
 function stIdx(t) { var i = STAGES.indexOf(String(t.stage || '').trim()); return i < 0 ? 0 : i; }
 function clParse(s) {
   return String(s || '').split('\n').map(function (x) { return x.trim(); }).filter(Boolean).map(function (l) {
-    return { d: l.charAt(0) === '☑', t: l.replace(/^[☑☐]\s*/, '') };
+    var t = l.replace(/^[☑☐]\s*/, ''), due = '', m = t.match(/^(.*?)\s+—\s+до\s+(\d{4}-\d\d-\d\d)$/);
+    if (m) { t = m[1]; due = m[2]; }
+    return { d: l.charAt(0) === '☑', t: t, due: due };
   });
 }
-function clStr(a) { return a.map(function (i) { return (i.d ? '☑ ' : '☐ ') + i.t; }).join('\n'); }
+function clStr(a) { return a.map(function (i) { return (i.d ? '☑ ' : '☐ ') + i.t + (isDate(i.due) ? ' — до ' + i.due : ''); }).join('\n'); }
 function trackXp(t) { var i = stIdx(t); return i * 40 + (i === 5 ? 100 : 0) + clParse(t.checklist).filter(function (x) { return x.d; }).length * 5; }
 function tracksAll() { return S.tracks.filter(function (t) { return has(t.id) && has(t.name); }); }
 
@@ -329,6 +337,7 @@ function setsParse(s) {
 }
 function setsStr(a) { return a.map(function (x) { return x.w + '×' + x.r; }).join(', '); }
 function setsShow(a) { return a.map(function (x) { return x.w > 0 ? fmt(x.w, 1) + '×' + x.r : x.r + ' повт.'; }).join(' · '); }
+function noMusic() { return lc(st('hideMusic', '')) === 'да'; }
 function isGym(h) { return h.type === 'gym' || String(h.id) === 'h_gym'; }
 function isSteps(h) { return h.type === 'steps' || String(h.id) === 'h_steps'; }
 function stepsGoal() { return num(st('stepsGoal', 8000)) || 8000; }
@@ -584,7 +593,7 @@ function render() {
   app.innerHTML = h + '<div id="syncbox">' + syncLine() + '</div>' + vNav();
 }
 function vNav() {
-  var tabs = [['home', 'grid', 'Главная', '#FFFFFF'], ['food', 'food', 'Рацион', '#34D399'], ['habits', 'habits', 'Привычки', '#FF4D6D'], ['fit', 'gym', 'Фитнес', '#FFFFFF'], ['more', UI.more === 'tasks' ? 'task' : 'music', 'Музыка и задачи', UI.more === 'tasks' ? '#FB923C' : '#A78BFA']];
+  var tabs = [['home', 'grid', 'Главная', '#FFFFFF'], ['food', 'food', 'Рацион', '#34D399'], ['habits', 'habits', 'Привычки', '#FF4D6D'], ['fit', 'gym', 'Фитнес', '#FFFFFF'], ['more', (UI.more === 'tasks' || noMusic()) ? 'task' : 'music', noMusic() ? 'Задачи' : 'Музыка и задачи', (UI.more === 'tasks' || noMusic()) ? '#FB923C' : '#A78BFA']];
   return '<nav class="nav" aria-label="Разделы">' + tabs.map(function (t) {
     var on = UI.tab === t[0];
     return '<button data-a="tab" data-v="' + t[0] + '" aria-label="' + t[2] + '"' + (on ? ' aria-current="page" style="background:' + t[3] + ';color:#000"' : '') + '>' + ic(t[1], 24) + '</button>';
@@ -623,7 +632,7 @@ function vHome(r) {
     '<span class="disp" style="font-size:20px;font-weight:600">' + esc(lname(L.n)) + '</span>' +
     '<span class="sub" style="font-size:13px"><b style="color:var(--gold)">' + fmt(r.xp) + '</b> / ' + fmt(L.hi) + ' XP · ещё ' + fmt(L.left) + '</span></div></div>' +
     '<div style="display:flex;flex-direction:column;gap:11px;width:100%"><span class="lbl">Характеристики</span>' +
-    STATS.map(function (s) {
+    STATS.filter(function (s) { return !(noMusic() && s[1] === 'творчество'); }).map(function (s) {
       var x = statLvl(r.stats[s[1]] || 0);
       return '<div style="display:grid;grid-template-columns:124px minmax(0,1fr) 24px;align-items:center;gap:10px"><span style="font-size:14px;color:#E4E4E7">' + s[0] + '</span>' + bar(x.frac, s[2]) + '<span class="sub" style="font-size:13px;text-align:right">' + x.n + '</span></div>';
     }).join('') + '</div></button>';
@@ -640,7 +649,7 @@ function vHome(r) {
     '<button class="tile" data-a="tab" data-v="fit" data-fit="body"><span class="sub">Цель · ' + fmt(gw, 1) + ' кг</span><span class="big">' + Math.round(prog * 100) + '%</span>' +
     '<div style="display:flex;flex-direction:column;gap:6px">' + bar(Math.max(prog, .02), 'var(--gold)') + '<span style="font-size:12px" class="mut">' + (cw > gw ? 'осталось ' + fmt(cw - gw, 1) + ' кг' : 'цель взята!') + '</span></div></button>' +
     '<button class="tile" style="min-height:140px" data-a="tab" data-v="more" data-more="tasks"><span class="sub">Задачи</span><div style="display:flex;align-items:baseline;gap:6px"><span class="big" style="color:' + (dueT ? 'var(--orange)' : '#fff') + '">' + dueT + '</span><span class="sub">на сегодня</span></div><span style="font-size:12px" class="mut">всего открыто: ' + openT.length + '</span></button>' +
-    '<button class="tile" style="min-height:140px" data-a="tab" data-v="more" data-more="music"><span class="sub">Музыка</span><div style="display:flex;align-items:baseline;gap:6px"><span class="big" style="color:var(--violet)">' + workTr.length + '</span><span class="sub">в работе</span></div><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" class="mut">' + (workTr[0] ? esc(workTr[0].name) + ' · ' + STAGES[stIdx(workTr[0])] : (tracksAll().length ? 'релизов: ' + tracksAll().length : 'добавь первый трек')) + '</span></button>' +
+    (noMusic() ? '' : '<button class="tile" style="min-height:140px" data-a="tab" data-v="more" data-more="music"><span class="sub">Музыка</span><div style="display:flex;align-items:baseline;gap:6px"><span class="big" style="color:var(--violet)">' + workTr.length + '</span><span class="sub">в работе</span></div><span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%" class="mut">' + (workTr[0] ? esc(workTr[0].name) + ' · ' + STAGES[stIdx(workTr[0])] : (tracksAll().length ? 'релизов: ' + tracksAll().length : 'добавь первый трек')) + '</span></button>') +
     '</div>';
   return h;
 }
@@ -905,9 +914,9 @@ function vWk(r) {
 
 /* ----- музыка и задачи ----- */
 function vMore(r) {
-  var m = UI.more === 'tasks';
+  var nm = noMusic(), m = UI.more === 'tasks' || nm;
   var h = '<div class="hdr"><h1 class="h1">' + (m ? 'Задачи' : 'Музыка') + '</h1><button class="rbtn fill" style="background:' + (m ? 'var(--orange)' : 'var(--violet)') + '" data-a="' + (m ? 'tNew' : 'trNew') + '" aria-label="' + (m ? 'Новая задача' : 'Новый трек') + '">' + ic('plus', 22, 2.4) + '</button></div>' +
-    '<div class="seg"><button data-a="more" data-v="music" class="' + (m ? '' : 'on') + '">Музыка</button><button data-a="more" data-v="tasks" class="' + (m ? 'on' : '') + '">Задачи</button></div>';
+    (nm ? '' : '<div class="seg"><button data-a="more" data-v="music" class="' + (m ? '' : 'on') + '">Музыка</button><button data-a="more" data-v="tasks" class="' + (m ? 'on' : '') + '">Задачи</button></div>');
   if (srvOld()) return h + oldCard();
   return h + (m ? vTasks() : vMusic());
 }
@@ -921,7 +930,46 @@ function taskRow(t) {
     '<button class="htxt" data-a="tEdit" data-id="' + esc(t.id) + '"><b' + (done ? ' style="text-decoration:line-through;font-weight:500"' : '') + '>' + esc(t.title) + '</b><span>' + meta.join(' · ') + '</span></button>' +
     '<span style="font-size:13px;font-weight:600;color:var(--gold);flex-shrink:0">+' + (done ? taskXp(t) : taskPot(t)) + '</span></div>';
 }
+var MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+function calEvents() {
+  var ev = {};
+  function add(d, o) { (ev[d] = ev[d] || []).push(o); }
+  tasksAll().forEach(function (t) { if (isDate(t.due)) add(t.due, { k: 'task', t: t, done: taskDone(t) }); });
+  if (!noMusic()) tracksAll().forEach(function (tr) {
+    if (stIdx(tr) === 5) return;
+    if (isDate(tr.due)) add(tr.due, { k: 'music', id: tr.id, label: tr.name, sub: 'срок трека · ' + STAGES[stIdx(tr)], done: false });
+    clParse(tr.checklist).forEach(function (x) { if (isDate(x.due)) add(x.due, { k: 'music', id: tr.id, label: x.t, sub: tr.name, done: x.d }); });
+  });
+  return ev;
+}
+function vCal() {
+  var T = today(), sel = UI.calDay || T, ym = UI.calYM || sel.slice(0, 7), p = ym.split('-'), y = +p[0], m = +p[1];
+  var n = new Date(y, m, 0).getDate(), off = (new Date(y, m - 1, 1).getDay() + 6) % 7, ev = calEvents(), cells = '';
+  for (var i = 0; i < off; i++) cells += '<span></span>';
+  for (var day = 1; day <= n; day++) {
+    var s = ym + '-' + pad(day), list = ev[s] || [], open = list.filter(function (x) { return !x.done; });
+    var dots = list.slice(0, 4).map(function (x) { return '<i style="background:' + (x.done ? '#52525B' : (x.k === 'music' ? '#A78BFA' : '#FB923C')) + '"></i>'; }).join('');
+    cells += '<button class="cd' + (s === sel ? ' sel' : '') + (s === T ? ' td' : '') + '" data-a="calDay" data-v="' + s + '" aria-label="' + day + ' ' + MG[m - 1] + (list.length ? ', дел: ' + list.length : '') + '"><b style="font-weight:600;color:' + (open.length && s < T ? '#FF8FA3' : 'inherit') + '">' + day + '</b><span class="dots2">' + dots + '</span></button>';
+  }
+  var h = '<div class="card" style="padding:14px;display:flex;flex-direction:column;gap:12px"><div class="row"><button class="x" data-a="calNav" data-v="-1" aria-label="Прошлый месяц">' + ic('left', 20) + '</button><span class="ctitle">' + MONTHS[m - 1] + ' ' + y + '</span><button class="x" data-a="calNav" data-v="1" aria-label="Следующий месяц">' + ic('right', 20) + '</button></div>' +
+    '<div class="calg" style="font-size:12px;text-align:center;color:var(--mut)">' + WD.map(function (w) { return '<span>' + w + '</span>'; }).join('') + '</div><div class="calg">' + cells + '</div>' +
+    '<div class="chips" style="font-size:12px;color:var(--mut);gap:12px"><span style="display:flex;align-items:center;gap:5px"><i style="width:7px;height:7px;border-radius:50%;background:#FB923C;display:block"></i>задача</span>' + (noMusic() ? '' : '<span style="display:flex;align-items:center;gap:5px"><i style="width:7px;height:7px;border-radius:50%;background:#A78BFA;display:block"></i>музыка</span>') + '<span style="display:flex;align-items:center;gap:5px"><i style="width:7px;height:7px;border-radius:50%;background:#52525B;display:block"></i>сделано</span></div></div>';
+  var dl = ev[sel] || [];
+  h += '<span class="sec">' + (sel === T ? 'Сегодня, ' : '') + dLong(sel) + ', ' + WDL[wd(sel)] + '</span><div style="display:flex;flex-direction:column;gap:10px">' + dl.map(function (x) {
+    if (x.k === 'task') return taskRow(x.t);
+    return '<div class="tk"' + (x.done ? ' style="opacity:.6"' : '') + '><div class="hico" style="width:44px;height:44px;border-radius:14px;background:rgba(167,139,250,.16);color:var(--violet)">' + ic('music', 20) + '</div><button class="htxt" data-a="trEdit" data-id="' + esc(x.id) + '"><b' + (x.done ? ' style="text-decoration:line-through;font-weight:500"' : '') + '>' + esc(x.label) + '</b><span>' + esc(x.sub) + '</span></button></div>';
+  }).join('') + '</div>';
+  if (!dl.length) h += '<div class="card soon sub">На этот день ничего нет.</div>';
+  h += '<button class="btn ghost" data-a="tNew" data-due="' + sel + '">' + ic('plus', 18, 2.4) + 'Задача на ' + dShort(sel) + '</button>';
+  var noDue = tasksAll().filter(function (t) { return !taskDone(t) && !isDate(t.due); }).length;
+  if (noDue) h += '<span class="sub" style="font-size:13px;text-align:center">Без срока: ' + noDue + ' — они видны в списке.</span>';
+  return h;
+}
 function vTasks() {
+  var tv = '<div class="seg"><button data-a="tView" data-v="list" class="' + (UI.taskView === 'cal' ? '' : 'on') + '">Список</button><button data-a="tView" data-v="cal" class="' + (UI.taskView === 'cal' ? 'on' : '') + '">Календарь</button></div>';
+  return tv + (UI.taskView === 'cal' ? vCal() : vTaskList());
+}
+function vTaskList() {
   var T = today(), we = addD(T, 6 - wd(T)), all = tasksAll();
   var open = all.filter(function (t) { return !taskDone(t); }).sort(function (a, b) { return cmp(a.prio || 'P2', b.prio || 'P2') || cmp(a.due || '9999', b.due || '9999') || cmp(a.created, b.created); });
   var over = open.filter(function (t) { return isDate(t.due) && t.due < T; });
@@ -948,10 +996,11 @@ function trackCard(t) {
     '<span style="font-size:12px;font-weight:600;color:#000;background:var(--violet);border-radius:999px;padding:6px 10px;white-space:nowrap">' + STAGES[i] + '</span></div>' +
     '<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px">' + segs + '</div>';
   if (cl.length) h += '<div style="display:flex;flex-direction:column;gap:2px">' + cl.map(function (x, n) {
-    return '<button class="cl' + (x.d ? ' on' : '') + '" data-a="trCk" data-id="' + id + '" data-i="' + n + '"><span class="bx">' + (x.d ? ic('check', 14, 3.5) : '') + '</span><span class="t">' + esc(x.t) + '</span></button>';
+    return '<button class="cl' + (x.d ? ' on' : '') + '" data-a="trCk" data-id="' + id + '" data-i="' + n + '"><span class="bx">' + (x.d ? ic('check', 14, 3.5) : '') + '</span><span class="t">' + esc(x.t) + '</span>' + (isDate(x.due) ? '<span style="margin-left:auto;padding-left:8px;font-size:12px;white-space:nowrap;color:' + (!x.d && x.due < today() ? '#FF8FA3' : 'var(--mut)') + '">' + dueLbl(x.due) + '</span>' : '') + '</button>';
   }).join('') + '</div>';
+  if (isDate(t.due)) h += '<span style="font-size:13px;color:' + (t.due < today() ? '#FF8FA3' : 'var(--mut)') + '">Срок трека: ' + dueLbl(t.due) + '</span>';
   h += '<div class="row"><span class="sub" style="font-size:13px">' + (cl.length ? dn + ' из ' + cl.length : 'чек-лист пуст') + '</span>' +
-    '<button class="add-s" style="border-color:rgba(167,139,250,.5);color:var(--violet)" data-a="trNext" data-id="' + id + '">' + ic('right', 16, 2.4) + STAGES[i + 1] + ' · +' + (i + 1 === 5 ? 140 : 40) + '</button></div></div>';
+    '<button class="add-s" style="border-color:rgba(167,139,250,.5);color:var(--violet);white-space:nowrap" data-a="trNext" data-id="' + id + '">' + ic('right', 16, 2.4) + STAGES[i + 1] + ' · +' + (i + 1 === 5 ? 140 : 40) + '</button></div></div>';
   return h;
 }
 function vMusic() {
@@ -1051,6 +1100,7 @@ function renderSheet() {
       '<div class="field"><label>Пол</label><div class="seg" style="height:50px"><button data-a="sSex" data-v="м" class="' + (d.sex !== 'ж' ? 'on' : '') + '">М</button><button data-a="sSex" data-v="ж" class="' + (d.sex === 'ж' ? 'on' : '') + '">Ж</button></div></div></div>' +
       '<div class="field"><label>Движение</label><div class="seg">' + [[1.2, 'Мало'], [1.375, '1–3 трен.'], [1.55, '3–5 трен.']].map(function (a) { return '<button data-a="sAct" data-v="' + a[0] + '" class="' + (num(d.activity) === a[0] ? 'on' : '') + '">' + a[1] + '</button>'; }).join('') + '</div></div>' +
       '<div class="f2">' + fld('Стартовый вес', 'startWeight', d.startWeight, DEC) + fld('Цель, кг', 'goalWeight', d.goalWeight, DEC) + fld('Шагов в день', 'stepsGoal', d.stepsGoal, 'inputmode="numeric"') + '</div>' +
+      '<div class="field"><label>Раздел «Музыка»</label><div class="seg"><button data-a="sMus" data-v="нет" class="' + (d.hideMusic === 'да' ? '' : 'on') + '">Показывать</button><button data-a="sMus" data-v="да" class="' + (d.hideMusic === 'да' ? 'on' : '') + '">Скрыть</button></div></div>' +
       '<span class="lbl">Питание</span>' +
       '<div class="f2">' + fld('Норма, ккал', 'kcal', d.kcal, 'inputmode="numeric"') + fld('Коридор, ± ккал', 'corridor', d.corridor, 'inputmode="numeric"') +
       fld('Белки, г', 'protein', d.protein, 'inputmode="numeric"') + fld('Жиры, г', 'fat', d.fat, 'inputmode="numeric"') + fld('Углеводы, г', 'carbs', d.carbs, 'inputmode="numeric"') + '</div>' +
@@ -1093,9 +1143,10 @@ function renderSheet() {
   } else if (s.type === 'track') {
     h = sheetHead(d.id ? 'Трек' : 'Новый трек') + fld('Название', 'name', d.name, 'autocomplete="off"') +
       '<span class="lbl">Этап</span><div class="chips">' + STAGES.map(function (x) { return '<button class="gchip" data-a="trStage" data-v="' + x + '" style="' + (d.stage === x ? 'background:var(--violet);border-color:var(--violet);color:#000' : '') + '">' + x + '</button>'; }).join('') + '</div>' +
-      '<span class="lbl">Чек-лист</span>' +
-      (d.items.length ? '<div>' + d.items.map(function (x, i) { return '<div class="row" style="min-height:44px;border-bottom:1px solid var(--line)"><span style="font-size:15px;' + (x.d ? 'color:var(--mut);text-decoration:line-through' : '') + '">' + esc(x.t) + '</span><button class="x" data-a="trClDel" data-i="' + i + '" aria-label="Убрать пункт">' + ic('x', 18) + '</button></div>'; }).join('') + '</div>' : '') +
-      '<div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px"><input id="tr-new" class="inp" data-f="newItem" autocomplete="off" aria-label="Новый пункт" placeholder="Например, свести вокал" value="' + esc(d.newItem || '') + '"><button class="gchip" style="height:50px" data-a="trClAdd">Добавить</button></div>' +
+      '<div class="field"><label>Срок трека (необязательно)</label><input class="inp" type="date" data-f="due" value="' + esc(d.due || '') + '"></div>' +
+      '<span class="lbl">Чек-лист · у каждого пункта свой срок</span>' +
+      (d.items.length ? '<div>' + d.items.map(function (x, i) { return '<div style="padding:8px 0;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:6px"><span style="font-size:15px;' + (x.d ? 'color:var(--mut);text-decoration:line-through' : '') + '">' + esc(x.t) + '</span><div style="display:grid;grid-template-columns:auto minmax(0,1fr) 40px;gap:8px;align-items:center"><span class="mut" style="font-size:13px">срок</span><input class="inp" style="height:42px" type="date" data-ci="due" data-i="' + i + '" aria-label="Срок пункта" value="' + esc(x.due || '') + '"><button class="x" data-a="trClDel" data-i="' + i + '" aria-label="Убрать пункт">' + ic('x', 18) + '</button></div></div>'; }).join('') + '</div>' : '') +
+      '<input id="tr-new" class="inp" data-f="newItem" autocomplete="off" aria-label="Новый пункт" placeholder="Новый пункт, например: свести вокал" value="' + esc(d.newItem || '') + '"><div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px"><input class="inp" type="date" data-f="newDue" aria-label="Срок нового пункта" value="' + esc(d.newDue || '') + '"><button class="gchip" style="height:50px" data-a="trClAdd">Добавить</button></div>' +
       fld('Заметка', 'note', d.note, 'autocomplete="off" placeholder="жанр, с кем, ссылка"') +
       '<button class="btn" style="background:var(--violet);color:#000" data-a="trSave">Сохранить</button>' +
       (d.id ? '<button class="btn danger" data-a="trDel">' + ic('trash', 18) + 'Удалить трек</button>' : '');
@@ -1224,6 +1275,7 @@ var A = {
     var d = {};
     ['name', 'height', 'age', 'sex', 'activity', 'startWeight', 'goalWeight', 'kcal', 'corridor', 'protein', 'fat', 'carbs'].forEach(function (k) { d[k] = st(k, ''); });
     d.stepsGoal = st('stepsGoal', 8000);
+    d.hideMusic = noMusic() ? 'да' : 'нет';
     d.url = conf.url; d.key = conf.key;
     openSheet('settings', d);
   },
@@ -1362,7 +1414,13 @@ var A = {
   fitR: function (el) { UI.fitRange = +el.dataset.v; render(); },
   more: function (el) { UI.more = el.dataset.v; LS.set('tr_more', UI.more); render(); },
   /* задачи */
-  tNew: function () { if (srvOld()) { toast('Сначала обнови сервер', true); return; } openSheet('task', { title: '', prio: 'P2', due: '', tag: '', note: '' }); },
+  tNew: function (el) { if (srvOld()) { toast('Сначала обнови сервер', true); return; } openSheet('task', { title: '', prio: 'P2', due: (el && el.dataset && isDate(el.dataset.due)) ? el.dataset.due : '', tag: '', note: '' }); },
+  tView: function (el) { UI.taskView = el.dataset.v; LS.set('tr_tv', UI.taskView); render(); },
+  calDay: function (el) { UI.calDay = el.dataset.v; UI.calYM = el.dataset.v.slice(0, 7); render(); },
+  calNav: function (el) {
+    var ym = UI.calYM || (UI.calDay || today()).slice(0, 7), p = ym.split('-'), d = new Date(+p[0], +p[1] - 1 + (+el.dataset.v), 1);
+    UI.calYM = d.getFullYear() + '-' + pad(d.getMonth() + 1); render();
+  },
   tEdit: function (el) { var t = byId(S.tasks, el.dataset.id); if (!t) return; openSheet('task', { id: String(t.id), title: t.title, prio: t.prio || 'P2', due: isDate(t.due) ? t.due : '', tag: t.tag || '', note: t.note || '' }); },
   tPrio: function (el) { UI.sheet.data.prio = el.dataset.v; renderSheet(); },
   tDue: function (el) { UI.sheet.data.due = el.dataset.v; renderSheet(); },
@@ -1381,21 +1439,21 @@ var A = {
     act(function () { push({ op: 'task.save', item: { id: String(t.id), status: done ? 'Очередь' : 'Готово', doneAt: done ? '' : today() } }); });
   },
   /* музыка */
-  trNew: function () { if (srvOld()) { toast('Сначала обнови сервер', true); return; } openSheet('track', { name: '', stage: 'Идея', items: [], note: '', newItem: '' }); },
-  trEdit: function (el) { var t = byId(S.tracks, el.dataset.id); if (!t) return; openSheet('track', { id: String(t.id), name: t.name, stage: STAGES[stIdx(t)], items: clParse(t.checklist), note: t.note || '', newItem: '' }); },
+  trNew: function () { if (srvOld()) { toast('Сначала обнови сервер', true); return; } openSheet('track', { name: '', stage: 'Идея', items: [], note: '', newItem: '', newDue: '', due: '' }); },
+  trEdit: function (el) { var t = byId(S.tracks, el.dataset.id); if (!t) return; openSheet('track', { id: String(t.id), name: t.name, stage: STAGES[stIdx(t)], items: clParse(t.checklist), note: t.note || '', newItem: '', newDue: '', due: isDate(t.due) ? t.due : '' }); },
   trStage: function (el) { UI.sheet.data.stage = el.dataset.v; renderSheet(); },
   trClAdd: function () {
     var d = UI.sheet.data, x = String(d.newItem || '').trim();
     if (!x) return;
-    d.items.push({ d: false, t: x }); d.newItem = ''; renderSheet();
+    d.items.push({ d: false, t: x, due: isDate(d.newDue) ? d.newDue : '' }); d.newItem = ''; d.newDue = ''; renderSheet();
     var i = $('tr-new'); if (i) i.focus();
   },
   trClDel: function (el) { UI.sheet.data.items.splice(+el.dataset.i, 1); renderSheet(); },
   trSave: function () {
     var d = UI.sheet.data, name = String(d.name || '').trim(), extra = String(d.newItem || '').trim();
     if (!name) { toast('Напиши название', true); return; }
-    if (extra) d.items.push({ d: false, t: extra });
-    var item = { id: d.id || uid(), name: name, stage: d.stage || 'Идея', checklist: clStr(d.items), note: String(d.note || '').trim(), updated: today() };
+    if (extra) d.items.push({ d: false, t: extra, due: isDate(d.newDue) ? d.newDue : '' });
+    var item = { id: d.id || uid(), name: name, stage: d.stage || 'Идея', checklist: clStr(d.items), note: String(d.note || '').trim(), updated: today(), due: isDate(d.due) ? d.due : '' };
     if (!d.id) item.created = today();
     closeSheet(); act(function () { push({ op: 'track.save', item: item }); });
   },
@@ -1499,6 +1557,7 @@ var A = {
     act(function () { list.forEach(function (item) { push({ op: 'food.save', item: item, isNew: false }); }); });
   },
   /* настройки */
+  sMus: function (el) { UI.sheet.data.hideMusic = el.dataset.v; renderSheet(); },
   sSex: function (el) { UI.sheet.data.sex = el.dataset.v; renderSheet(); },
   sAct: function (el) { UI.sheet.data.activity = +el.dataset.v; renderSheet(); },
   recalc: function () {
@@ -1516,6 +1575,7 @@ var A = {
   saveSet: function () {
     var d = UI.sheet.data, item = {};
     ['name', 'sex'].forEach(function (k) { item[k] = String(d[k] || '').trim(); });
+    item.hideMusic = d.hideMusic === 'да' ? 'да' : 'нет';
     ['height', 'age', 'activity', 'startWeight', 'goalWeight', 'kcal', 'corridor', 'protein', 'fat', 'carbs', 'stepsGoal'].forEach(function (k) { if (has(d[k])) item[k] = num(d[k]); });
     closeSheet(); act(function () { push({ op: 'settings.save', item: item }); });
   },
@@ -1536,6 +1596,7 @@ document.addEventListener('input', function (e) {
   var el = e.target;
   if (!UI.sheet) return;
   if (el.dataset.f) { UI.sheet.data[el.dataset.f] = el.value; return; }
+  if (el.dataset.ci) { var ci = UI.sheet.data.items[+el.dataset.i]; if (ci) ci[el.dataset.ci] = el.value; return; }
   if (el.dataset.pi) {
     var it = UI.sheet.data.items[+el.dataset.i]; if (!it) return;
     it[el.dataset.pi] = el.value;
