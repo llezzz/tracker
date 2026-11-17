@@ -78,6 +78,7 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 .seg button.on{background:#2A2A2E;color:#fff}
 .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:40;animation:fade .2s}
 .sheet{position:fixed;left:0;right:0;bottom:0;max-width:480px;margin:0 auto;max-height:92vh;max-height:92dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:#141416;border-radius:28px 28px 0 0;padding:10px 18px calc(env(safe-area-inset-bottom) + 22px);z-index:41;animation:up .26s ease-out;display:flex;flex-direction:column;gap:14px}
+.sheet>*{flex-shrink:0}
 .handle{width:40px;height:5px;border-radius:3px;background:#3F3F46;margin:0 auto}
 .stitle{font-family:var(--disp);font-size:19px;font-weight:600}
 .x{width:40px;height:40px;border-radius:20px;border:none;background:var(--card2);display:flex;align-items:center;justify-content:center;padding:0;color:var(--mut);flex-shrink:0}
@@ -143,17 +144,17 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 <input type="file" id="cam" accept="image/*" hidden>
 <script>
 'use strict';
-var VERSION = '2.5';
+var VERSION = '2.6';
 
 /* ---------- хранилище в браузере ---------- */
 var LS = {
   get: function (k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 };
-function emptyState() { return { settings: {}, products: [], food: [], habits: [], checks: [], weights: [], levels: [], tasks: [], tracks: [], workouts: [], exercises: [], steps: [] }; }
+function emptyState() { return { settings: {}, products: [], food: [], habits: [], checks: [], weights: [], levels: [], tasks: [], tracks: [], workouts: [], exercises: [], steps: [], plan: [] }; }
 var conf = LS.get('tr_conf', { url: '', key: '' });
 var S = LS.get('tr_cache', null) || emptyState();
-['tasks', 'tracks', 'workouts', 'exercises', 'steps'].forEach(function (k) { if (!S[k]) S[k] = []; });
+['tasks', 'tracks', 'workouts', 'exercises', 'steps', 'plan'].forEach(function (k) { if (!S[k]) S[k] = []; });
 var SRV = LS.get('tr_srv', '');
 var Q = LS.get('tr_queue', []);
 var UI = { taskView: LS.get('tr_tv', 'list'), calDay: null, calYM: null, tab: LS.get('tr_tab', 'home'), foodDate: null, habitBack: 0, fitRange: 30, more: LS.get('tr_more', 'music'), fitTab: LS.get('tr_fit', 'wk'), wkDate: null, showDone: false, sheet: null };
@@ -367,6 +368,16 @@ function lastOf(name, exceptId) {
   var rows = wkRows().filter(function (w) { return lc(w.exercise) === lc(name) && String(w.id) !== String(exceptId || ''); });
   return rows.length ? rows[rows.length - 1] : null;
 }
+function planDay(d) {
+  var w = WDL[wd(d)];
+  return S.plan.filter(function (p) { return lc(p.day) === w && has(p.exercise); }).sort(function (a, b) { return num(a.order) - num(b.order); });
+}
+function planFor(name, d) {
+  var w = d ? WDL[wd(d)] : '', hit = null;
+  S.plan.forEach(function (p) { if (lc(p.exercise) === lc(name) && (!hit || lc(p.day) === w)) hit = p; });
+  return hit;
+}
+function videoUrl(name) { return 'https://www.youtube.com/results?search_query=' + encodeURIComponent(name + ' техника выполнения'); }
 function bestShow(b) { return b.w > 0 ? fmt(b.w, 1) + ' кг × ' + b.r : b.r + ' повт.'; }
 
 /* ---------- очки, уровни, значки ---------- */
@@ -500,7 +511,7 @@ function fromServer(j) {
   return {
     settings: j.settings || {}, products: j.products || [], food: (j.food || []).map(function (f) { f.id = String(f.id); return f; }),
     habits: (j.habits || []).map(function (h) { h.id = String(h.id); return h; }), checks: j.checks || [], weights: j.weights || [], levels: j.levels || [],
-    tasks: (j.tasks || []).map(sid), tracks: (j.tracks || []).map(sid), workouts: (j.workouts || []).map(sid), exercises: j.exercises || [], steps: j.steps || []
+    tasks: (j.tasks || []).map(sid), tracks: (j.tracks || []).map(sid), workouts: (j.workouts || []).map(sid), exercises: j.exercises || [], steps: j.steps || [], plan: j.plan || []
   };
 }
 function sync() {
@@ -886,6 +897,20 @@ function vWk(r) {
     '<div class="tile" style="min-height:128px"><span class="sub">Объём за 7 дней</span><div style="display:flex;align-items:baseline;gap:4px"><span class="big" style="font-size:' + (vol >= 10000 ? 26 : 34) + 'px">' + fmt(vol) + '</span><span class="sub">кг</span></div><span style="font-size:12px" class="mut">вес × повторы</span></div></div>';
   h += '<div class="card" style="display:flex;flex-direction:column;gap:14px"><div class="row"><span class="ctitle">Календарь</span><span class="sub" style="font-size:13px">рекордов: ' + stt.prs + '</span></div>' + dotCal(stt.days) + '</div>';
   var rows = (IX.wk[D] || []).slice().sort(function (a, b) { return cmp(a.added, b.added); });
+  var pl = planDay(D);
+  if (pl.length) {
+    var doneN = pl.filter(function (p) { return rows.some(function (w) { return lc(w.exercise) === lc(p.exercise); }); }).length;
+    h += '<div class="card" style="padding:6px 18px 12px"><div class="row" style="padding:12px 0 6px"><span class="ctitle">План · ' + WDF[wd(D)].toLowerCase() + '</span><span class="sub" style="font-size:13px">' + doneN + ' из ' + pl.length + '</span></div>' +
+      pl.map(function (p) {
+        var ok = rows.some(function (w) { return lc(w.exercise) === lc(p.exercise); });
+        return '<button class="fi" data-a="planPick" data-v="' + esc(p.exercise) + '"><div style="min-width:0"><div class="n"' + (ok ? ' style="color:var(--mut);text-decoration:line-through"' : '') + '>' + esc(p.exercise) + '</div><div class="g">' + esc(p.sets) + ' × ' + esc(p.reps) + '</div></div>' +
+          (ok ? '<span style="width:28px;height:28px;border-radius:14px;background:#fff;color:#000;display:flex;align-items:center;justify-content:center;flex-shrink:0">' + ic('check', 16, 3) + '</span>' : '<span class="mut">' + ic('right', 18) + '</span>') + '</button>';
+      }).join('') + '</div>';
+  } else if (S.plan.length && D === T) {
+    var nx = '';
+    for (var k = 1; k <= 7 && !nx; k++) if (planDay(addD(T, k)).length) nx = k === 1 ? 'завтра' : WDF[wd(addD(T, k))].toLowerCase();
+    h += '<div class="card soon sub" style="line-height:1.5">Сегодня по плану отдых и шаги.' + (nx ? ' Следующая тренировка: ' + nx + '.' : '') + '</div>';
+  }
   h += '<div class="card" style="padding:6px 18px 18px"><div class="row" style="padding:12px 0 6px"><span class="ctitle">' + (D === T ? 'Сегодня' : dLong(D)) + '</span>' +
     (D !== T ? '<button class="add-s" data-a="wkDay" data-v="" style="border-color:rgba(255,255,255,.25);color:#fff">К сегодня</button>' : (rows.length ? '<span style="font-size:13px;font-weight:600;color:var(--gold)">+20 XP</span>' : '')) + '</div>';
   rows.forEach(function (w) {
@@ -1157,6 +1182,8 @@ function renderSheet() {
   } else if (s.type === 'sets') {
     h = sheetHead(esc(d.name)) +
       (d.last ? '<span class="sub" style="margin-top:-6px">Прошлый раз, ' + dShort(d.last.date) + ': ' + setsShow(setsParse(d.last.sets)) + '</span>' : '<span class="sub" style="margin-top:-6px">Первый раз — впиши, как получилось.</span>') +
+      (d.plan ? '<div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:8px"><b style="font-size:15px">По плану: ' + esc(d.plan.sets) + ' × ' + esc(d.plan.reps) + '</b>' + (has(d.plan.tip) ? '<span class="sub" style="font-size:13px;line-height:1.5">' + esc(d.plan.tip) + '</span>' : '') + '</div>' : '') +
+      '<a class="btn ghost" style="text-decoration:none" href="' + videoUrl(d.name) + '" target="_blank" rel="noopener">' + ic('right', 18, 2.4) + 'Видео: как делать</a>' +
       '<div class="field"><label>Дата</label><input class="inp" type="date" data-f="date" value="' + esc(d.date) + '" max="' + today() + '"></div>' +
       '<div class="setr" style="font-size:13px;color:var(--mut)"><span style="text-align:center">№</span><span>Вес, кг</span><span>Повторы</span><span></span></div>' +
       d.sets.map(function (x, i) {
@@ -1478,15 +1505,24 @@ var A = {
     openSheet('expick', { date: UI.wkDate || today(), q: '' });
   },
   exOpen: function (name) {
-    var d = UI.sheet.data, last = lastOf(name);
-    openSheet('sets', { date: d.date, name: name, last: last, sets: last ? setsParse(last.sets).map(function (x) { return { w: x.w || '', r: x.r }; }) : [{ w: '', r: '' }] });
+    var d = UI.sheet.data, last = lastOf(name), pl = planFor(name, d.date), sets;
+    if (last) sets = setsParse(last.sets).map(function (x) { return { w: x.w || '', r: x.r }; });
+    else if (pl) { sets = []; for (var i = 0; i < Math.max(1, Math.min(8, num(pl.sets))); i++) sets.push({ w: '', r: parseInt(pl.reps, 10) || '' }); }
+    else sets = [{ w: '', r: '' }];
+    openSheet('sets', { date: d.date, name: name, last: last, plan: pl, sets: sets });
   },
   exPick: function (el) { A.exOpen(el.dataset.v); },
+  planPick: function (el) {
+    if (srvOld()) { toast('Сначала обнови сервер', true); return; }
+    var D = UI.wkDate || today(), name = el.dataset.v, row = (IX.wk[D] || []).filter(function (w) { return lc(w.exercise) === lc(name); })[0];
+    if (row) { A.exEdit({ dataset: { id: String(row.id) } }); return; }
+    UI.sheet = { type: 'expick', data: { date: D, q: '' } }; A.exOpen(name);
+  },
   exNewName: function () { var n = String(UI.sheet.data.q || '').trim(); if (n) A.exOpen(n); },
   exEdit: function (el) {
     var w = byId(S.workouts, el.dataset.id); if (!w) return;
     var ss = setsParse(w.sets).map(function (x) { return { w: x.w || '', r: x.r }; });
-    openSheet('sets', { editId: String(w.id), date: w.date, name: w.exercise, last: lastOf(w.exercise, w.id), sets: ss.length ? ss : [{ w: '', r: '' }] });
+    openSheet('sets', { editId: String(w.id), date: w.date, name: w.exercise, plan: planFor(w.exercise, w.date), last: lastOf(w.exercise, w.id), sets: ss.length ? ss : [{ w: '', r: '' }] });
   },
   setAdd: function () { var a = UI.sheet.data.sets, l = a[a.length - 1] || { w: '', r: '' }; a.push({ w: l.w, r: l.r }); renderSheet(); },
   setDel: function (el) { var a = UI.sheet.data.sets; a.splice(+el.dataset.i, 1); if (!a.length) a.push({ w: '', r: '' }); renderSheet(); },
