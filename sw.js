@@ -1,6 +1,6 @@
 /* Личный трекер — кэш приложения, чтобы открывалось мгновенно и без сети.
-   При обновлении файлов поменяй CACHE (например, tracker-v9). */
-var CACHE = 'tracker-v9';
+   При обновлении файлов поменяй CACHE (например, tracker-v10). */
+var CACHE = 'tracker-v10';
 var SHELL = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {

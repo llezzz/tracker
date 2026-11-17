@@ -144,7 +144,7 @@ input,select,textarea{font-family:inherit;font-size:16px;color:#fff}
 <input type="file" id="cam" accept="image/*" hidden>
 <script>
 'use strict';
-var VERSION = '2.6';
+var VERSION = '2.7';
 
 /* ---------- хранилище в браузере ---------- */
 var LS = {
@@ -430,7 +430,8 @@ function calc() {
   return r;
 }
 function lvlInfo(xp) { var n = 1; while (xp >= 75 * n * (n + 1)) n++; var lo = 75 * (n - 1) * n, hi = 75 * n * (n + 1); return { n: n, lo: lo, hi: hi, frac: (xp - lo) / (hi - lo), left: hi - xp }; }
-function lname(n) { var L = (S.levels || []).filter(has); return L[n - 1] || LNAMES[n - 1] || ('Уровень ' + n); }
+/* Названия уровней — только свои, с листа «Уровни». Старый стандартный набор (LNAMES) не показывается: тогда просто «Уровень N». */
+function lname(n) { var L = (S.levels || []).filter(has).map(String), x = L[n - 1] || ''; return (x && x !== LNAMES[n - 1]) ? x : ''; }
 function statLvl(x) { var n = 1; while (x >= 25 * n * (n + 1)) n++; var lo = 25 * (n - 1) * n, hi = 25 * n * (n + 1); return { n: n, frac: (x - lo) / (hi - lo) }; }
 function badgeList(r) {
   return [
@@ -571,7 +572,7 @@ function checkProgress(silent) {
   var fresh = got.filter(function (b) { return seen.b.indexOf(b.id) < 0; });
   if (L > seen.l) {
     modal('<div class="ring">' + ring(120, 10, 1, '#FFC53D') + '<div><span class="disp" style="font-size:44px;font-weight:700;color:var(--gold)">' + L + '</span></div></div>' +
-      '<div class="lbl" style="color:var(--gold)">Новый уровень</div><div class="disp" style="font-size:24px;font-weight:600">' + esc(lname(L)) + '</div>' +
+      '<div class="lbl" style="color:var(--gold)">Новый уровень</div><div class="disp" style="font-size:24px;font-weight:600">' + esc(lname(L) || ('Уровень ' + L)) + '</div>' +
       '<div class="sub">До следующего — ' + fmt(lvlInfo(r.xp).left) + ' XP</div><button class="btn white" data-a="closeModal" style="margin-top:6px">Вперёд</button>');
   } else if (fresh.length) {
     var b = fresh[0];
@@ -639,8 +640,11 @@ function vHome(r) {
   h += '<button class="card" data-a="level" style="display:flex;flex-direction:column;gap:18px;text-align:left;width:100%">' +
     '<div style="display:flex;align-items:center;gap:16px;width:100%"><div class="ring" style="width:84px;height:84px">' + ring(84, 8, L.frac, '#FFC53D') +
     '<div class="disp" style="font-size:28px;font-weight:700;color:var(--gold)">' + L.n + '</div></div>' +
-    '<div style="display:flex;flex-direction:column;gap:6px;min-width:0"><span class="sub" style="font-size:13px">Уровень ' + L.n + (r.today.xp + r.todayExtra ? ' · сегодня +' + (r.today.xp + r.todayExtra) + ' XP' : '') + '</span>' +
-    '<span class="disp" style="font-size:20px;font-weight:600">' + esc(lname(L.n)) + '</span>' +
+    '<div style="display:flex;flex-direction:column;gap:6px;min-width:0">' +
+    (lname(L.n) ? '<span class="sub" style="font-size:13px">Уровень ' + L.n + (r.today.xp + r.todayExtra ? ' · сегодня +' + (r.today.xp + r.todayExtra) + ' XP' : '') + '</span>' +
+      '<span class="disp" style="font-size:20px;font-weight:600">' + esc(lname(L.n)) + '</span>'
+    : '<span class="disp" style="font-size:20px;font-weight:600">Уровень ' + L.n + '</span>' +
+      (r.today.xp + r.todayExtra ? '<span class="sub" style="font-size:13px">Сегодня +' + (r.today.xp + r.todayExtra) + ' XP</span>' : '')) +
     '<span class="sub" style="font-size:13px"><b style="color:var(--gold)">' + fmt(r.xp) + '</b> / ' + fmt(L.hi) + ' XP · ещё ' + fmt(L.left) + '</span></div></div>' +
     '<div style="display:flex;flex-direction:column;gap:11px;width:100%"><span class="lbl">Характеристики</span>' +
     STATS.filter(function (s) { return !(noMusic() && s[1] === 'творчество'); }).map(function (s) {
@@ -1140,11 +1144,11 @@ function renderSheet() {
     for (var n = 1; n <= top; n++) {
       var thr = 75 * (n - 1) * n, done = n < L.n, cur = n === L.n;
       lad += '<div class="lad" style="' + (n > L.n ? 'opacity:.45' : '') + '"><div class="num" style="background:' + (cur ? 'var(--gold)' : (done ? 'rgba(255,197,61,.18)' : '#2A2A2E')) + ';color:' + (cur ? '#000' : (done ? 'var(--gold)' : 'var(--mut)')) + '">' + n + '</div>' +
-        '<div style="flex-grow:1"><b style="font-size:15px">' + esc(lname(n)) + '</b></div><span class="sub" style="font-size:13px">' + (n === 1 ? 'старт' : 'с ' + fmt(thr) + ' XP') + '</span></div>';
+        '<div style="flex-grow:1"><b style="font-size:15px">' + esc(lname(n) || ('Уровень ' + n)) + '</b></div><span class="sub" style="font-size:13px">' + (n === 1 ? 'старт' : 'с ' + fmt(thr) + ' XP') + '</span></div>';
     }
     h = sheetHead('Уровень ' + L.n) +
       '<div style="display:flex;align-items:center;gap:16px"><div class="ring" style="width:96px;height:96px">' + ring(96, 9, L.frac, '#FFC53D') + '<div class="disp" style="font-size:32px;font-weight:700;color:var(--gold)">' + L.n + '</div></div>' +
-      '<div><div class="disp" style="font-size:20px;font-weight:600">' + esc(lname(L.n)) + '</div><div class="sub" style="margin-top:4px">' + fmt(r.xp) + ' XP · до ' + (L.n + 1) + '-го ещё ' + fmt(L.left) + '</div></div></div>' +
+      '<div>' + (lname(L.n) ? '<div class="disp" style="font-size:20px;font-weight:600">' + esc(lname(L.n)) + '</div>' : '') + '<div class="sub" style="margin-top:4px">' + fmt(r.xp) + ' XP · до ' + (L.n + 1) + '-го ещё ' + fmt(L.left) + '</div></div></div>' +
       '<span class="lbl">Как начисляются очки</span><div class="card" style="padding:14px 16px;font-size:14px;line-height:1.6;color:#E4E4E7">' +
       'Каждая выполненная привычка — её XP (видно в строке привычки).<br>День в коридоре калорий (норма ± ' + fmt(corridor()) + ') — +15.<br>Каждый сброшенный килограмм от старта — +30.<br>Тренировка в журнале — +20, новый рекорд — +10.<br>Задача: P1 +25, P2 +15, P3 +10; сдал в срок — в полтора раза больше.<br>Трек: +40 за каждый этап, +100 за релиз, +5 за пункт чек-листа.<br>Серия — дни подряд, где закрыто не меньше 80% привычек.<br><span class="mut">Отменил отметку или удалил запись — очки уходят.</span></div>' +
       '<span class="lbl">Значки</span><div class="badges">' + badgeList(r).map(function (b) {
